@@ -22,7 +22,9 @@ export const Overview = () => {
           <MessageIcon />
         </p>
         <p>
-          Quirky Expeditions - AI Travel Agent
+          Quirky Expeditions is a fully autonomous AI travel agent to help you with all
+          your travel needs. You can ask it to suggest destinations, create itineraries,
+          and even book flights, hotels, even the entire itinerary for you.
         </p>
       </div>
     </motion.div>
