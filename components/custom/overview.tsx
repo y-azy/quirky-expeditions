@@ -21,9 +21,8 @@ export const Overview = () => {
         </p>
         <p>
           Quirky Expeditions - AI Travel Agent
-          <br />
-          <span className="text-zinc-500 dark:text-zinc-400">
         </p>
+      </div>
     </motion.div>
   );
 };
