@@ -25,12 +25,30 @@ export async function searchFlights(params: {
 }
 
 export async function getSeatMap(params: {
-  flightOfferId: string;
+  flightOfferId?: string;
+  flightOrderId?: string;
 }) {
   try {
-    const response = await amadeus.shopping.seatmaps.get({
-      flightOfferId: params.flightOfferId
-    });
+    let response;
+    if (params.flightOfferId) {
+      // When we have a flight offer, we need to use POST
+      response = await amadeus.shopping.seatmaps.post(
+        JSON.stringify({
+          data: [{
+            type: "flight-offers",
+            id: params.flightOfferId
+          }]
+        })
+      );
+    } else if (params.flightOrderId) {
+      // When we have a flight order, we use GET
+      response = await amadeus.shopping.seatmaps.get({
+        flightOrderId: params.flightOrderId
+      });
+    } else {
+      throw new Error('Either flightOfferId or flightOrderId is required');
+    }
+    
     return response.data[0];
   } catch (error) {
     console.error('Error fetching seat map:', error);
@@ -57,7 +75,22 @@ export async function confirmFlightPrice(flightOffer: any) {
 
 export async function createFlightOrder(params: {
   flightOffer: any;
-  travelers: any[];
+  traveler: {
+    id: string;
+    dateOfBirth: string;
+    name: {
+      firstName: string;
+      lastName: string;
+    };
+    contact: {
+      emailAddress: string;
+      phones: Array<{
+        deviceType: string;
+        countryCallingCode: string;
+        number: string;
+      }>;
+    };
+  };
 }) {
   try {
     const response = await amadeus.booking.flightOrders.post(
@@ -65,11 +98,15 @@ export async function createFlightOrder(params: {
         data: {
           type: 'flight-order',
           flightOffers: [params.flightOffer],
-          travelers: params.travelers
+          travelers: [params.traveler]
         }
       })
     );
-    return response.data;
+    
+    return {
+      orderId: response.data.id,
+      ...response.data
+    };
   } catch (error) {
     console.error('Error creating flight order:', error);
     throw error;

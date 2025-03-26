@@ -17,6 +17,7 @@ interface FlightCardProps {
     airlines: string[];
     priceInUSD: number;
     numberOfStops: number;
+    raw?: any; // Original flight offer data
   };
   onSelect?: () => void;
 }

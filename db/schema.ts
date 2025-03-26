@@ -48,6 +48,7 @@ export const flightBooking = pgTable("FlightBooking", {
   reservationId: uuid("reservationId").references(() => reservation.id),
   flightNumber: varchar("flightNumber", { length: 10 }).notNull(),
   flightOfferId: varchar("flightOfferId", { length: 64 }).notNull(),
+  flightOrderId: varchar("flightOrderId", { length: 64 }), // Optional at first, filled after booking
   seatNumbers: json("seatNumbers").notNull(),
   totalPrice: decimal("totalPrice", { precision: 10, scale: 2 }).notNull(),
   status: varchar("status", { length: 20 }).notNull().default("pending"),

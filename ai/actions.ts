@@ -89,12 +89,15 @@ export async function generateSampleSeatSelection({
   flightOfferId: string;
 }) {
   try {
-    const seatmap = await getSeatMap({ flightOfferId });
+    const seatmap = await getSeatMap({ flightOfferId }); // Using POST method with flight offer
     const seats = [];
 
-    for (const deck of seatmap.data.decks) {
-      for (const row of deck.rows) {
-        for (const seat of row.seats) {
+    // Extract decks array safely
+    const decks = seatmap.data?.decks || [];
+    
+    for (const deck of decks) {
+      for (const row of deck.rows || []) {
+        for (const seat of row.seats || []) {
           if (seat) {
             seats.push({
               seatNumber: seat.number,
@@ -110,7 +113,8 @@ export async function generateSampleSeatSelection({
     return { seats };
   } catch (error) {
     console.error('Error fetching seat map:', error);
-    throw error;
+    // Return empty seats array instead of throwing to prevent chat flow interruption
+    return { seats: [] };
   }
 }
 

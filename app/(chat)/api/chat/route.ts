@@ -118,9 +118,13 @@ export async function POST(request: Request) {
         description: "Select seats for a flight",
         parameters: z.object({
           flightNumber: z.string().describe("Flight number"),
+          flightOfferId: z.string().describe("Flight offer ID from search results"),
         }),
-        execute: async ({ flightNumber }) => {
-          const seats = await generateSampleSeatSelection({ flightNumber });
+        execute: async ({ flightNumber, flightOfferId }) => {
+          const seats = await generateSampleSeatSelection({ 
+            flightNumber,
+            flightOfferId 
+          });
           return seats;
         },
       },

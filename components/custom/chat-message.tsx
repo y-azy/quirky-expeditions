@@ -29,7 +29,10 @@ export function ChatMessage({
           <FlightCard 
             key={flight.id} 
             flight={flight}
-            onSelect={() => onFlightSelect?.(flight)}
+            onSelect={() => onFlightSelect?.({
+              ...flight,
+              flightOfferId: flight.raw.id // Pass the flight offer ID
+            })}
           />
         ));
       case 'selectSeats':
