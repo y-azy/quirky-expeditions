@@ -1,43 +1,45 @@
 import { generateObject } from "ai";
 import { z } from "zod";
 
+import { amadeus } from "@/lib/amadeus";
 import { geminiFlashModel } from ".";
+import { searchFlights, getSeatMap, confirmFlightPrice, getFlightStatus } from '@/lib/amadeus-helpers';
 
-export async function generateSampleFlightStatus({
-  flightNumber,
-  date,
-}: {
+export async function generateFlightStatus(params: {
+  carrierCode: string;
   flightNumber: string;
   date: string;
 }) {
-  const { object: flightStatus } = await generateObject({
-    model: geminiFlashModel,
-    prompt: `Flight status for flight number ${flightNumber} on ${date}`,
-    schema: z.object({
-      flightNumber: z.string().describe("Flight number, e.g., BA123, AA31"),
-      departure: z.object({
-        cityName: z.string().describe("Name of the departure city"),
-        airportCode: z.string().describe("IATA code of the departure airport"),
-        airportName: z.string().describe("Full name of the departure airport"),
-        timestamp: z.string().describe("ISO 8601 departure date and time"),
-        terminal: z.string().describe("Departure terminal"),
-        gate: z.string().describe("Departure gate"),
-      }),
-      arrival: z.object({
-        cityName: z.string().describe("Name of the arrival city"),
-        airportCode: z.string().describe("IATA code of the arrival airport"),
-        airportName: z.string().describe("Full name of the arrival airport"),
-        timestamp: z.string().describe("ISO 8601 arrival date and time"),
-        terminal: z.string().describe("Arrival terminal"),
-        gate: z.string().describe("Arrival gate"),
-      }),
-      totalDistanceInMiles: z
-        .number()
-        .describe("Total flight distance in miles"),
-    }),
-  });
+  try {
+    const status = await getFlightStatus({
+      carrierCode: params.carrierCode,
+      flightNumber: params.flightNumber,
+      scheduledDate: params.date,
+    });
 
-  return flightStatus;
+    return {
+      flightNumber: `${params.carrierCode}${params.flightNumber}`,
+      status: status.flightStatus,
+      aircraft: status.aircraft.code,
+      departure: {
+        cityName: status.departure.city,
+        airportCode: status.departure.iataCode,
+        timestamp: status.departure.scheduledTime,
+        terminal: status.departure.terminal,
+        gate: status.departure.gate,
+      },
+      arrival: {
+        cityName: status.arrival.city,
+        airportCode: status.arrival.iataCode,
+        timestamp: status.arrival.scheduledTime,
+        terminal: status.arrival.terminal,
+        gate: status.arrival.gate,
+      },
+    };
+  } catch (error) {
+    console.error('Error generating flight status:', error);
+    throw error;
+  }
 }
 
 export async function generateSampleFlightSearchResults({
@@ -47,63 +49,75 @@ export async function generateSampleFlightSearchResults({
   origin: string;
   destination: string;
 }) {
-  const { object: flightSearchResults } = await generateObject({
-    model: geminiFlashModel,
-    prompt: `Generate search results for flights from ${origin} to ${destination}, limit to 4 results`,
-    output: "array",
-    schema: z.object({
-      id: z
-        .string()
-        .describe("Unique identifier for the flight, like BA123, AA31, etc."),
-      departure: z.object({
-        cityName: z.string().describe("Name of the departure city"),
-        airportCode: z.string().describe("IATA code of the departure airport"),
-        timestamp: z.string().describe("ISO 8601 departure date and time"),
-      }),
-      arrival: z.object({
-        cityName: z.string().describe("Name of the arrival city"),
-        airportCode: z.string().describe("IATA code of the arrival airport"),
-        timestamp: z.string().describe("ISO 8601 arrival date and time"),
-      }),
-      airlines: z.array(
-        z.string().describe("Airline names, e.g., American Airlines, Emirates"),
-      ),
-      priceInUSD: z.number().describe("Flight price in US dollars"),
-      numberOfStops: z.number().describe("Number of stops during the flight"),
-    }),
-  });
+  try {
+    const flightOffers = await searchFlights({
+      origin,
+      destination, 
+      departureDate: new Date().toISOString().split('T')[0]
+    });
 
-  return { flights: flightSearchResults };
+    const flights = flightOffers.map((offer: any) => ({
+      id: offer.id,
+      departure: {
+        cityName: offer.itineraries[0].segments[0].departure.iataCode,
+        airportCode: offer.itineraries[0].segments[0].departure.iataCode,
+        timestamp: offer.itineraries[0].segments[0].departure.at,
+      },
+      arrival: {
+        cityName: offer.itineraries[0].segments[0].arrival.iataCode,
+        airportCode: offer.itineraries[0].segments[0].arrival.iataCode,
+        timestamp: offer.itineraries[0].segments[0].arrival.at,
+      },
+      airlines: [offer.validatingAirlineCodes[0]],
+      priceInUSD: parseFloat(offer.price.total),
+      numberOfStops: offer.itineraries[0].segments.length - 1,
+      raw: offer // Store raw offer for later use
+    }));
+
+    return { flights };
+  } catch (error) {
+    console.error('Error searching flights:', error);
+    throw error;
+  }
 }
 
 export async function generateSampleSeatSelection({
   flightNumber,
+  flightOfferId,
 }: {
   flightNumber: string;
+  flightOfferId: string;
 }) {
-  const { object: rows } = await generateObject({
-    model: geminiFlashModel,
-    prompt: `Simulate available seats for flight number ${flightNumber}, 6 seats on each row and 5 rows in total, adjust pricing based on location of seat`,
-    output: "array",
-    schema: z.array(
-      z.object({
-        seatNumber: z.string().describe("Seat identifier, e.g., 12A, 15C"),
-        priceInUSD: z
-          .number()
-          .describe("Seat price in US dollars, less than $99"),
-        isAvailable: z
-          .boolean()
-          .describe("Whether the seat is available for booking"),
-      }),
-    ),
-  });
+  try {
+    const seatmap = await getSeatMap({ flightOfferId });
+    const seats = [];
 
-  return { seats: rows };
+    for (const deck of seatmap.data.decks) {
+      for (const row of deck.rows) {
+        for (const seat of row.seats) {
+          if (seat) {
+            seats.push({
+              seatNumber: seat.number,
+              priceInUSD: parseFloat(seat.travelerPricing?.[0]?.price?.total || '0'),
+              isAvailable: seat.travelerPricing?.[0]?.status === 'AVAILABLE',
+              cabin: seat.cabin
+            });
+          }
+        }
+      }
+    }
+
+    return { seats };
+  } catch (error) {
+    console.error('Error fetching seat map:', error);
+    throw error;
+  }
 }
 
 export async function generateReservationPrice(props: {
   seats: string[];
   flightNumber: string;
+  flightOfferId: string;
   departure: {
     cityName: string;
     airportCode: string;
@@ -120,15 +134,41 @@ export async function generateReservationPrice(props: {
   };
   passengerName: string;
 }) {
-  const { object: reservation } = await generateObject({
-    model: geminiFlashModel,
-    prompt: `Generate price for the following reservation \n\n ${JSON.stringify(props, null, 2)}`,
-    schema: z.object({
-      totalPriceInUSD: z
-        .number()
-        .describe("Total reservation price in US dollars"),
-    }),
-  });
+  try {
+    // Get confirmed pricing from Amadeus
+    const pricingResponse = await confirmFlightPrice(props.flightOfferId);
+    
+    // Calculate total price including selected seats
+    const seatMap = await getSeatMap({ flightOfferId: props.flightOfferId });
+    let seatPrice = 0;
+    
+    // Add seat prices to total
+    for (const seatNumber of props.seats) {
+      const seat = findSeatInMap(seatMap, seatNumber);
+      if (seat && seat.travelerPricing?.[0]?.price?.total) {
+        seatPrice += parseFloat(seat.travelerPricing[0].price.total);
+      }
+    }
 
-  return reservation;
+    return {
+      totalPriceInUSD: parseFloat(pricingResponse.flightOffers[0].price.total) + seatPrice
+    };
+  } catch (error) {
+    console.error('Error generating reservation price:', error);
+    throw error;
+  }
+}
+
+// Helper function to find seat in seatmap
+function findSeatInMap(seatMap: any, seatNumber: string) {
+  for (const deck of seatMap.data.decks) {
+    for (const row of deck.rows) {
+      for (const seat of row.seats) {
+        if (seat && seat.number === seatNumber) {
+          return seat;
+        }
+      }
+    }
+  }
+  return null;
 }

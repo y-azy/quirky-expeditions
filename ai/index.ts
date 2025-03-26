@@ -1,14 +1,13 @@
-import { google } from "@ai-sdk/google";
+import { openai } from "@ai-sdk/openai";
 import { experimental_wrapLanguageModel as wrapLanguageModel } from "ai";
-
 import { customMiddleware } from "./custom-middleware";
 
-export const geminiProModel = wrapLanguageModel({
-  model: google("gemini-1.5-pro-002"),
+export const model = wrapLanguageModel({
+  model: openai("gpt-4"),
   middleware: customMiddleware,
 });
 
-export const geminiFlashModel = wrapLanguageModel({
-  model: google("gemini-1.5-flash-002"),
+export const fastModel = wrapLanguageModel({
+  model: openai("gpt-3.5-turbo"),
   middleware: customMiddleware,
 });

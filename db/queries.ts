@@ -5,7 +5,7 @@ import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { user, chat, User, reservation } from "./schema";
+import { user, chat, User, reservation, flightBooking } from "./schema";
 
 // Optionally, if not using email/pass login, you can
 // use the Drizzle adapter for Auth.js / NextAuth
@@ -139,4 +139,37 @@ export async function updateReservation({
       hasCompletedPayment,
     })
     .where(eq(reservation.id, id));
+}
+
+export async function createFlightBooking({
+  reservationId,
+  flightNumber,
+  flightOfferId,
+  seatNumbers,
+  totalPrice,
+}: {
+  reservationId: string;
+  flightNumber: string;
+  flightOfferId: string;
+  seatNumbers: string[];
+  totalPrice: number;
+}) {
+  return await db.insert(flightBooking).values({
+    reservationId,
+    flightNumber,
+    flightOfferId,
+    seatNumbers: JSON.stringify(seatNumbers),
+    totalPrice,
+    status: 'pending',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+}
+
+export async function getFlightBookingByReservation(reservationId: string) {
+  const [booking] = await db
+    .select()
+    .from(flightBooking)
+    .where(eq(flightBooking.reservationId, reservationId));
+  return booking;
 }

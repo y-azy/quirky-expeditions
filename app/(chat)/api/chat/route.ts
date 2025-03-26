@@ -1,7 +1,7 @@
 import { convertToCoreMessages, Message, streamText } from "ai";
 import { z } from "zod";
 
-import { geminiProModel } from "@/ai";
+import { model as openAIModel } from "@/ai";
 import {
   generateReservationPrice,
   generateSampleFlightSearchResults,
@@ -15,8 +15,10 @@ import {
   getChatById,
   getReservationById,
   saveChat,
+  createFlightBooking,
 } from "@/db/queries";
 import { generateUUID } from "@/lib/utils";
+import { searchAirports, getFlightStatus, getFlightDelay, getAirlineDetails, getFlightPrice, getAirportDetails } from "@/lib/amadeus-helpers";
 
 export async function POST(request: Request) {
   const { id, messages }: { id: string; messages: Array<Message> } =
@@ -33,28 +35,39 @@ export async function POST(request: Request) {
   );
 
   const result = await streamText({
-    model: geminiProModel,
+    model: openAIModel,
     system: `\n
-        - you help users book flights!
-        - keep your responses limited to a sentence.
-        - DO NOT output lists.
-        - after every tool call, pretend you're showing the result to the user and keep your response limited to a phrase.
+        - you are an AI travel agent using real Amadeus API data
+        - use IATA airport codes when searching flights
+        - validate flight numbers before checking status
+        - suggest alternative dates if flights are not available
+        - mention airline names and aircraft types when available
+        - help users understand baggage policies and restrictions
+        - keep responses concise and professional
         - today's date is ${new Date().toLocaleDateString()}.
         - ask follow up questions to nudge user into the optimal flow
-        - ask for any details you don't know, like name of passenger, etc.'
-        - C and D are aisle seats, A and F are window seats, B and E are middle seats
-        - assume the most popular airports for the origin and destination
+        - ask for any details you don't know, like name of passenger, etc.
         - here's the optimal flow
-          - search for flights
-          - choose flight
-          - select seats
+          - search for flights using Amadeus Flight Offers Search API
+          - choose flight from the results
+          - select seats using Amadeus Seat Maps API
           - create reservation (ask user whether to proceed with payment or change reservation)
-          - authorize payment (requires user consent, wait for user to finish payment and let you know when done)
-          - display boarding pass (DO NOT display boarding pass without verifying payment)
+          - authorize payment (requires user consent, wait for user to finish payment)
+          - display boarding pass (DO NOT display without verifying payment)
         '
       `,
     messages: coreMessages,
     tools: {
+      searchAirports: {
+        description: "Search for airports by keyword",
+        parameters: z.object({
+          keyword: z.string().describe("Airport name or city"),
+        }),
+        execute: async ({ keyword }) => {
+          const airports = await searchAirports(keyword);
+          return airports;
+        },
+      },
       getWeather: {
         description: "Get the current weather at a location",
         parameters: z.object({
@@ -73,16 +86,17 @@ export async function POST(request: Request) {
       displayFlightStatus: {
         description: "Display the status of a flight",
         parameters: z.object({
-          flightNumber: z.string().describe("Flight number"),
-          date: z.string().describe("Date of the flight"),
+          carrierCode: z.string().describe("Airline carrier code (e.g., AA, BA)"),
+          flightNumber: z.string().describe("Flight number without carrier code"),
+          date: z.string().describe("Flight date (YYYY-MM-DD)"),
         }),
-        execute: async ({ flightNumber, date }) => {
-          const flightStatus = await generateSampleFlightStatus({
+        execute: async ({ carrierCode, flightNumber, date }) => {
+          const status = await getFlightStatus({
+            carrierCode,
             flightNumber,
-            date,
+            scheduledDate: date,
           });
-
-          return flightStatus;
+          return status;
         },
       },
       searchFlights: {
@@ -142,6 +156,15 @@ export async function POST(request: Request) {
               id,
               userId: session.user.id,
               details: { ...props, totalPriceInUSD },
+            });
+
+            // Create flight booking record
+            await createFlightBooking({
+              reservationId: id,
+              flightNumber: props.flightNumber,
+              flightOfferId: props.flightOfferId,
+              seatNumbers: props.seats,
+              totalPrice: totalPriceInUSD,
             });
 
             return { id, ...props, totalPriceInUSD };
@@ -211,6 +234,39 @@ export async function POST(request: Request) {
         }),
         execute: async (boardingPass) => {
           return boardingPass;
+        },
+      },
+      getAirlineInfo: {
+        description: "Get airline information by IATA code",
+        parameters: z.object({
+          airlineCode: z.string().describe("Airline IATA code"),
+        }),
+        execute: async ({ airlineCode }) => {
+          return await getAirlineDetails(airlineCode);
+        },
+      },
+      getFlightPriceMetrics: {
+        description: "Get flight price analysis",
+        parameters: z.object({
+          origin: z.string().describe("Origin airport IATA code"),
+          destination: z.string().describe("Destination airport IATA code"),
+          date: z.string().describe("Flight date YYYY-MM-DD"),
+        }),
+        execute: async ({ origin, destination, date }) => {
+          return await getFlightPrice({
+            origin,
+            destination,
+            departureDate: date,
+          });
+        },
+      },
+      getAirportInfo: {
+        description: "Get airport information",
+        parameters: z.object({
+          iataCode: z.string().describe("Airport IATA code"),
+        }),
+        execute: async ({ iataCode }) => {
+          return await getAirportDetails(iataCode);
         },
       },
     },

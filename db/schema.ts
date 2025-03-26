@@ -7,6 +7,7 @@ import {
   json,
   uuid,
   boolean,
+  decimal,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("User", {
@@ -41,3 +42,15 @@ export const reservation = pgTable("Reservation", {
 });
 
 export type Reservation = InferSelectModel<typeof reservation>;
+
+export const flightBooking = pgTable("FlightBooking", {
+  id: uuid("id").primaryKey().notNull().defaultRandom(),
+  reservationId: uuid("reservationId").references(() => reservation.id),
+  flightNumber: varchar("flightNumber", { length: 10 }).notNull(),
+  flightOfferId: varchar("flightOfferId", { length: 64 }).notNull(),
+  seatNumbers: json("seatNumbers").notNull(),
+  totalPrice: decimal("totalPrice", { precision: 10, scale: 2 }).notNull(),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  createdAt: timestamp("createdAt").notNull(),
+  updatedAt: timestamp("updatedAt").notNull(),
+});
