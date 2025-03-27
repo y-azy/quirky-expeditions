@@ -1,5 +1,5 @@
 import { format } from "date-fns";
-import { Card } from "@/components/ui/card";
+import { Card } from "../ui/card";
 
 interface BoardingPassProps {
   boardingPass: {

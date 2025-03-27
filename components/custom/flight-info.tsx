@@ -1,4 +1,4 @@
-import { Card } from "@/components/ui/card";
+import { Card } from "../ui/card";
 import { getAirlineDetails } from "@/lib/amadeus-helpers";
 import { useEffect, useState } from "react";
 

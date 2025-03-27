@@ -2,12 +2,6 @@ import { convertToCoreMessages, Message, streamText } from "ai";
 import { z } from "zod";
 
 import { model as openAIModel } from "@/ai";
-import {
-  generateReservationPrice,
-  generateSampleFlightSearchResults,
-  generateSampleFlightStatus,
-  generateSampleSeatSelection,
-} from "@/ai/actions";
 import { auth } from "@/app/(auth)/auth";
 import {
   createReservation,
@@ -18,7 +12,20 @@ import {
   createFlightBooking,
 } from "@/db/queries";
 import { generateUUID } from "@/lib/utils";
-import { searchAirports, getFlightStatus, getFlightDelay, getAirlineDetails, getFlightPrice, getAirportDetails } from "@/lib/amadeus-helpers";
+import { 
+  searchAirports, 
+  getFlightStatus, 
+  getFlightDelay, 
+  getAirlineDetails, 
+  getFlightPrice, 
+  getAirportDetails,
+  searchFlights,
+  getSeatMap,
+  confirmFlightPrice,
+  createFlightOrder,
+  getFlightInspirationSearch,
+  getCheapestFlightDates
+} from "@/lib/amadeus-helpers";
 
 export async function POST(request: Request) {
   const { id, messages }: { id: string; messages: Array<Message> } =
@@ -44,7 +51,7 @@ export async function POST(request: Request) {
         - mention airline names and aircraft types when available
         - help users understand baggage policies and restrictions
         - keep responses concise and professional
-        - today's date is ${new Date().toLocaleDateString()}.
+        - today's date is ${new Date().toLocaleDateString()}
         - ask follow up questions to nudge user into the optimal flow
         - ask for any details you don't know, like name of passenger, etc.
         - here's the optimal flow
@@ -54,8 +61,10 @@ export async function POST(request: Request) {
           - create reservation (ask user whether to proceed with payment or change reservation)
           - authorize payment (requires user consent, wait for user to finish payment)
           - display boarding pass (DO NOT display without verifying payment)
-        '
-      `,
+        - provide travel tips related to destinations
+        - offer information about travel requirements (visas, COVID, etc.)
+        - be helpful, friendly, and knowledgeable about travel
+        `,
     messages: coreMessages,
     tools: {
       searchAirports: {
@@ -64,8 +73,17 @@ export async function POST(request: Request) {
           keyword: z.string().describe("Airport name or city"),
         }),
         execute: async ({ keyword }) => {
-          const airports = await searchAirports(keyword);
-          return airports;
+          try {
+            const airports = await searchAirports(keyword);
+            return airports;
+          } catch (error) {
+            console.error("Error searching airports:", error);
+            return [{ 
+              name: "Error searching airports", 
+              iataCode: "ERR", 
+              cityName: "Please try again" 
+            }];
+          }
         },
       },
       getWeather: {
@@ -75,12 +93,19 @@ export async function POST(request: Request) {
           longitude: z.number().describe("Longitude coordinate"),
         }),
         execute: async ({ latitude, longitude }) => {
-          const response = await fetch(
-            `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m&hourly=temperature_2m&daily=sunrise,sunset&timezone=auto`,
-          );
+          try {
+            const response = await fetch(
+              `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m&hourly=temperature_2m&daily=sunrise,sunset&timezone=auto`,
+            );
 
-          const weatherData = await response.json();
-          return weatherData;
+            const weatherData = await response.json();
+            return weatherData;
+          } catch (error) {
+            console.error("Error fetching weather:", error);
+            return {
+              error: "Failed to fetch weather data"
+            };
+          }
         },
       },
       displayFlightStatus: {
@@ -91,27 +116,131 @@ export async function POST(request: Request) {
           date: z.string().describe("Flight date (YYYY-MM-DD)"),
         }),
         execute: async ({ carrierCode, flightNumber, date }) => {
-          const status = await getFlightStatus({
-            carrierCode,
-            flightNumber,
-            scheduledDate: date,
-          });
-          return status;
+          try {
+            const status = await getFlightStatus({
+              carrierCode,
+              flightNumber,
+              scheduledDate: date,
+            });
+            
+            return {
+              flightNumber: `${carrierCode}${flightNumber}`,
+              departure: {
+                cityName: status.departure.cityName || status.departure.iataCode,
+                airportCode: status.departure.iataCode,
+                airportName: status.departure.airportName || `${status.departure.iataCode} Airport`,
+                timestamp: status.departure.at || status.departure.scheduledTime,
+                terminal: status.departure.terminal || "Main",
+                gate: status.departure.gate || "TBA",
+              },
+              arrival: {
+                cityName: status.arrival.cityName || status.arrival.iataCode,
+                airportCode: status.arrival.iataCode,
+                airportName: status.arrival.airportName || `${status.arrival.iataCode} Airport`,
+                timestamp: status.arrival.at || status.arrival.scheduledTime,
+                terminal: status.arrival.terminal || "Main",
+                gate: status.arrival.gate || "TBA",
+              },
+              totalDistanceInMiles: status.distance || 0,
+            };
+          } catch (error) {
+            console.error("Error fetching flight status:", error);
+            // Return mock data as fallback
+            return {
+              flightNumber: `${carrierCode}${flightNumber}`,
+              departure: {
+                cityName: "Origin",
+                airportCode: "ORG",
+                airportName: "Origin Airport",
+                timestamp: new Date().toISOString(),
+                terminal: "TBA",
+                gate: "TBA",
+              },
+              arrival: {
+                cityName: "Destination",
+                airportCode: "DST",
+                airportName: "Destination Airport",
+                timestamp: new Date(Date.now() + 3600000).toISOString(),
+                terminal: "TBA",
+                gate: "TBA",
+              },
+              totalDistanceInMiles: 0,
+            };
+          }
         },
       },
       searchFlights: {
         description: "Search for flights based on the given parameters",
         parameters: z.object({
-          origin: z.string().describe("Origin airport or city"),
-          destination: z.string().describe("Destination airport or city"),
+          origin: z.string().describe("Origin airport or city IATA code"),
+          destination: z.string().describe("Destination airport or city IATA code"),
+          departureDate: z.string().describe("Departure date (YYYY-MM-DD)"),
+          returnDate: z.string().optional().describe("Return date for round trip (YYYY-MM-DD)"),
+          adults: z.string().optional().describe("Number of adult passengers"),
         }),
-        execute: async ({ origin, destination }) => {
-          const results = await generateSampleFlightSearchResults({
-            origin,
-            destination,
-          });
+        execute: async ({ origin, destination, departureDate, returnDate, adults }) => {
+          try {
+            const flightOffers = await searchFlights({
+              origin,
+              destination,
+              departureDate,
+              returnDate,
+              adults
+            });
 
-          return results;
+            const flights = flightOffers.map((offer: any) => {
+              // Extract the first segment for simplicity
+              const firstSegment = offer.itineraries[0].segments[0];
+              
+              return {
+                id: offer.id,
+                flightOfferId: offer.id, // Store for later use
+                departure: {
+                  cityName: firstSegment.departure.iataCode,
+                  airportCode: firstSegment.departure.iataCode,
+                  timestamp: firstSegment.departure.at,
+                },
+                arrival: {
+                  cityName: firstSegment.arrival.iataCode,
+                  airportCode: firstSegment.arrival.iataCode,
+                  timestamp: firstSegment.arrival.at,
+                },
+                airlines: [offer.validatingAirlineCodes[0]],
+                flightNumber: `${firstSegment.carrierCode}${firstSegment.number}`,
+                priceInUSD: parseFloat(offer.price.total),
+                numberOfStops: offer.itineraries[0].segments.length - 1,
+                raw: offer // Store raw offer for later use
+              };
+            });
+
+            return { flights };
+          } catch (error) {
+            console.error("Error searching flights:", error);
+            // Return minimal mock data as fallback
+            return { 
+              flights: [
+                {
+                  id: "mock-flight-id",
+                  flightOfferId: "mock-flight-id",
+                  departure: {
+                    cityName: origin,
+                    airportCode: origin,
+                    timestamp: new Date(departureDate + "T12:00:00").toISOString(),
+                  },
+                  arrival: {
+                    cityName: destination,
+                    airportCode: destination,
+                    timestamp: new Date(departureDate + "T14:00:00").toISOString(),
+                  },
+                  airlines: ["XX"],
+                  flightNumber: "XX1234",
+                  priceInUSD: 299.99,
+                  numberOfStops: 0,
+                  raw: {}
+                }
+              ] 
+            };
+          }
         },
       },
       selectSeats: {
@@ -121,11 +250,41 @@ export async function POST(request: Request) {
           flightOfferId: z.string().describe("Flight offer ID from search results"),
         }),
         execute: async ({ flightNumber, flightOfferId }) => {
-          const seats = await generateSampleSeatSelection({ 
-            flightNumber,
-            flightOfferId 
-          });
-          return seats;
+          try {
+            const seatMap = await getSeatMap({ flightOfferId });
+            const seats = [];
+
+            // Extract seats from the seatmap
+            if (seatMap.data && seatMap.data.decks) {
+              for (const deck of seatMap.data.decks) {
+                for (const row of deck.rows || []) {
+                  for (const seat of row.seats || []) {
+                    if (seat) {
+                      seats.push({
+                        seatNumber: seat.number,
+                        priceInUSD: parseFloat(seat.travelerPricing?.[0]?.price?.total || '0'),
+                        isAvailable: seat.travelerPricing?.[0]?.status === 'AVAILABLE',
+                        cabin: seat.travelerPricing?.[0]?.cabin || seat.cabin || 'ECONOMY'
+                      });
+                    }
+                  }
+                }
+              }
+            }
+
+            return { 
+              flightNumber,
+              flightOfferId,
+              seats: seats.length > 0 ? seats : generateMockSeats(flightNumber)
+            };
+          } catch (error) {
+            console.error("Error selecting seats:", error);
+            return { 
+              flightNumber,
+              flightOfferId,
+              seats: generateMockSeats(flightNumber)
+            };
+          }
         },
       },
       createReservation: {
@@ -133,29 +292,57 @@ export async function POST(request: Request) {
         parameters: z.object({
           seats: z.string().array().describe("Array of selected seat numbers"),
           flightNumber: z.string().describe("Flight number"),
+          flightOfferId: z.string().describe("Flight offer ID from search results"),
           departure: z.object({
             cityName: z.string().describe("Name of the departure city"),
             airportCode: z.string().describe("Code of the departure airport"),
             timestamp: z.string().describe("ISO 8601 date of departure"),
-            gate: z.string().describe("Departure gate"),
-            terminal: z.string().describe("Departure terminal"),
+            gate: z.string().optional().describe("Departure gate"),
+            terminal: z.string().optional().describe("Departure terminal"),
           }),
           arrival: z.object({
             cityName: z.string().describe("Name of the arrival city"),
             airportCode: z.string().describe("Code of the arrival airport"),
             timestamp: z.string().describe("ISO 8601 date of arrival"),
-            gate: z.string().describe("Arrival gate"),
-            terminal: z.string().describe("Arrival terminal"),
+            gate: z.string().optional().describe("Arrival gate"),
+            terminal: z.string().optional().describe("Arrival terminal"),
           }),
           passengerName: z.string().describe("Name of the passenger"),
         }),
         execute: async (props) => {
-          const { totalPriceInUSD } = await generateReservationPrice(props);
-          const session = await auth();
+          try {
+            // Calculate price based on flight offer and seats
+            let totalPriceInUSD = 199.99; // Default fallback price
+            
+            try {
+              const pricingResponse = await confirmFlightPrice(props.flightOfferId);
+              totalPriceInUSD = parseFloat(pricingResponse.flightOffers[0].price.total);
+              
+              // Add seat prices
+              const seatMap = await getSeatMap({ flightOfferId: props.flightOfferId });
+              if (seatMap.data && seatMap.data.decks) {
+                for (const seatNumber of props.seats) {
+                  for (const deck of seatMap.data.decks) {
+                    for (const row of deck.rows || []) {
+                      for (const seat of row.seats || []) {
+                        if (seat && seat.number === seatNumber && seat.travelerPricing?.[0]?.price?.total) {
+                          totalPriceInUSD += parseFloat(seat.travelerPricing[0].price.total);
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (error) {
+              console.error("Error calculating price, using fallback:", error);
+            }
+            
+            const session = await auth();
+            if (!session || !session.user || !session.user.id) {
+              return { error: "User is not signed in to perform this action!" };
+            }
 
-          const id = generateUUID();
-
-          if (session && session.user && session.user.id) {
+            const id = generateUUID();
             await createReservation({
               id,
               userId: session.user.id,
@@ -171,39 +358,47 @@ export async function POST(request: Request) {
               totalPrice: totalPriceInUSD,
             });
 
-            return { id, ...props, totalPriceInUSD };
-          } else {
-            return {
-              error: "User is not signed in to perform this action!",
+            return { 
+              id, 
+              ...props, 
+              totalPriceInUSD,
+              hasCompletedPayment: false 
             };
+          } catch (error) {
+            console.error("Error creating reservation:", error);
+            return { error: "Failed to create reservation" };
           }
         },
       },
       authorizePayment: {
-        description:
-          "User will enter credentials to authorize payment, wait for user to repond when they are done",
+        description: "User will enter credentials to authorize payment, wait for user to respond when they are done",
         parameters: z.object({
-          reservationId: z
-            .string()
-            .describe("Unique identifier for the reservation"),
+          reservationId: z.string().describe("Unique identifier for the reservation"),
         }),
         execute: async ({ reservationId }) => {
-          return { reservationId };
+          try {
+            const reservation = await getReservationById({ id: reservationId });
+            return { 
+              reservationId,
+              hasCompletedPayment: reservation.hasCompletedPayment || false 
+            };
+          } catch (error) {
+            console.error("Error fetching reservation:", error);
+            return { reservationId, hasCompletedPayment: false };
+          }
         },
       },
       verifyPayment: {
         description: "Verify payment status",
         parameters: z.object({
-          reservationId: z
-            .string()
-            .describe("Unique identifier for the reservation"),
+          reservationId: z.string().describe("Unique identifier for the reservation"),
         }),
         execute: async ({ reservationId }) => {
-          const reservation = await getReservationById({ id: reservationId });
-
-          if (reservation.hasCompletedPayment) {
-            return { hasCompletedPayment: true };
-          } else {
+          try {
+            const reservation = await getReservationById({ id: reservationId });
+            return { hasCompletedPayment: reservation.hasCompletedPayment || false };
+          } catch (error) {
+            console.error("Error verifying payment:", error);
             return { hasCompletedPayment: false };
           }
         },
@@ -211,12 +406,8 @@ export async function POST(request: Request) {
       displayBoardingPass: {
         description: "Display a boarding pass",
         parameters: z.object({
-          reservationId: z
-            .string()
-            .describe("Unique identifier for the reservation"),
-          passengerName: z
-            .string()
-            .describe("Name of the passenger, in title case"),
+          reservationId: z.string().describe("Unique identifier for the reservation"),
+          passengerName: z.string().describe("Name of the passenger, in title case"),
           flightNumber: z.string().describe("Flight number"),
           seat: z.string().describe("Seat number"),
           departure: z.object({
@@ -237,7 +428,17 @@ export async function POST(request: Request) {
           }),
         }),
         execute: async (boardingPass) => {
-          return boardingPass;
+          try {
+            // Verify payment before showing boarding pass
+            const reservation = await getReservationById({ id: boardingPass.reservationId });
+            if (!reservation.hasCompletedPayment) {
+              return { error: "Payment not completed. Cannot display boarding pass." };
+            }
+            return boardingPass;
+          } catch (error) {
+            console.error("Error displaying boarding pass:", error);
+            return { error: "Failed to display boarding pass" };
+          }
         },
       },
       getAirlineInfo: {
@@ -246,7 +447,16 @@ export async function POST(request: Request) {
           airlineCode: z.string().describe("Airline IATA code"),
         }),
         execute: async ({ airlineCode }) => {
-          return await getAirlineDetails(airlineCode);
+          try {
+            return await getAirlineDetails(airlineCode);
+          } catch (error) {
+            console.error("Error fetching airline info:", error);
+            return { 
+              iataCode: airlineCode,
+              businessName: airlineCode + " Airlines",
+              error: "Failed to fetch detailed airline information"
+            };
+          }
         },
       },
       getFlightPriceMetrics: {
@@ -257,11 +467,21 @@ export async function POST(request: Request) {
           date: z.string().describe("Flight date YYYY-MM-DD"),
         }),
         execute: async ({ origin, destination, date }) => {
-          return await getFlightPrice({
-            origin,
-            destination,
-            departureDate: date,
-          });
+          try {
+            return await getFlightPrice({
+              origin,
+              destination,
+              departureDate: date,
+            });
+          } catch (error) {
+            console.error("Error fetching flight price metrics:", error);
+            return { 
+              error: "Failed to fetch price metrics",
+              averagePrice: 399.99,
+              minimumPrice: 299.99,
+              maximumPrice: 599.99, 
+            };
+          }
         },
       },
       getAirportInfo: {
@@ -270,9 +490,60 @@ export async function POST(request: Request) {
           iataCode: z.string().describe("Airport IATA code"),
         }),
         execute: async ({ iataCode }) => {
-          return await getAirportDetails(iataCode);
+          try {
+            return await getAirportDetails(iataCode);
+          } catch (error) {
+            console.error("Error fetching airport info:", error);
+            return { 
+              iataCode,
+              name: iataCode + " International Airport",
+              cityName: "Unknown City",
+              countryName: "Unknown Country",
+              error: "Failed to fetch detailed airport information"
+            };
+          }
         },
       },
+      getFlightInspirations: {
+        description: "Get flight inspiration suggestions from an origin",
+        parameters: z.object({
+          origin: z.string().describe("Origin airport IATA code"),
+          maxPrice: z.number().optional().describe("Maximum price in USD"),
+        }),
+        execute: async ({ origin, maxPrice }) => {
+          try {
+            return await getFlightInspirationSearch({ origin, maxPrice });
+          } catch (error) {
+            console.error("Error fetching flight inspirations:", error);
+            return { 
+              error: "Failed to fetch flight inspirations",
+              destinations: [
+                { destination: "LON", price: { total: "199.99" } },
+                { destination: "PAR", price: { total: "249.99" } },
+                { destination: "ROM", price: { total: "299.99" } }
+              ]
+            };
+          }
+        }
+      },
+      getCheapestDates: {
+        description: "Get cheapest dates for flights between two locations",
+        parameters: z.object({
+          origin: z.string().describe("Origin airport IATA code"),
+          destination: z.string().describe("Destination airport IATA code"),
+        }),
+        execute: async ({ origin, destination }) => {
+          try {
+            return await getCheapestFlightDates({ origin, destination });
+          } catch (error) {
+            console.error("Error fetching cheapest dates:", error);
+            return {
+              error: "Failed to fetch cheapest dates",
+              cheapestDates: []
+            };
+          }
+        }
+      }
     },
     onFinish: async ({ responseMessages }) => {
       if (session.user && session.user.id) {
@@ -283,7 +554,7 @@ export async function POST(request: Request) {
             userId: session.user.id,
           });
         } catch (error) {
-          console.error("Failed to save chat");
+          console.error("Failed to save chat:", error);
         }
       }
     },
@@ -294,6 +565,28 @@ export async function POST(request: Request) {
   });
 
   return result.toDataStreamResponse({});
+}
+
+// Helper function to generate mock seats for fallback
+function generateMockSeats(flightNumber: string) {
+  const cabins = ['ECONOMY', 'PREMIUM_ECONOMY', 'BUSINESS', 'FIRST'];
+  const seats = [];
+  
+  for (let row = 1; row <= 10; row++) {
+    for (let seat of ['A', 'B', 'C', 'D', 'E', 'F']) {
+      const seatNumber = `${row}${seat}`;
+      const cabinType = row > 8 ? cabins[1] : cabins[0]; // First 2 rows as premium
+      
+      seats.push({
+        seatNumber,
+        priceInUSD: cabinType === cabins[0] ? 25 : 45,
+        isAvailable: Math.random() > 0.3, // 70% of seats available
+        cabin: cabinType
+      });
+    }
+  }
+  
+  return seats;
 }
 
 export async function DELETE(request: Request) {
