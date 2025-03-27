@@ -1,4 +1,9 @@
 import Amadeus from "amadeus";
+import { config } from "dotenv";
+
+config({
+  path: ".env.local",
+});
 
 if (!process.env.AMADEUS_CLIENT_ID || !process.env.AMADEUS_CLIENT_SECRET) {
   throw new Error("Missing Amadeus credentials");
