@@ -1,4 +1,4 @@
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { Card } from "../ui/card";
 import { Separator } from "../ui/separator";
 
@@ -31,10 +31,30 @@ interface FlightDetailsProps {
       amount: number;
       currency: string;
     };
+    error?: string;
+    status?: string;
   };
 }
 
 export function FlightDetails({ flight }: FlightDetailsProps) {
+  if (flight.error || flight.status === "error") {
+    return (
+      <Card className="p-6">
+        <div className="bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-200 p-4 rounded-md">
+          <p>{flight.error || "Unable to display flight details"}</p>
+        </div>
+      </Card>
+    );
+  }
+
+  function formatDateTime(dateString: string): string {
+    try {
+      return format(parseISO(dateString), "PPp");
+    } catch {
+      return dateString;
+    }
+  }
+
   return (
     <Card className="p-6">
       <div className="flex flex-col gap-6">
@@ -57,8 +77,8 @@ export function FlightDetails({ flight }: FlightDetailsProps) {
           <div>
             <p className="text-sm text-muted-foreground">Departure</p>
             <p className="text-lg font-semibold">{flight.departure.cityName}</p>
-            <p className="text-sm">{flight.departure.airportName}</p>
-            <p className="text-sm">{format(new Date(flight.departure.timestamp), "PPp")}</p>
+            <p className="text-sm">{flight.departure.airportName || flight.departure.airportCode}</p>
+            <p className="text-sm">{formatDateTime(flight.departure.timestamp)}</p>
             {flight.departure.terminal && (
               <p className="text-sm">Terminal {flight.departure.terminal}</p>
             )}
@@ -70,8 +90,8 @@ export function FlightDetails({ flight }: FlightDetailsProps) {
           <div>
             <p className="text-sm text-muted-foreground">Arrival</p>
             <p className="text-lg font-semibold">{flight.arrival.cityName}</p>
-            <p className="text-sm">{flight.arrival.airportName}</p>
-            <p className="text-sm">{format(new Date(flight.arrival.timestamp), "PPp")}</p>
+            <p className="text-sm">{flight.arrival.airportName || flight.arrival.airportCode}</p>
+            <p className="text-sm">{formatDateTime(flight.arrival.timestamp)}</p>
             {flight.arrival.terminal && (
               <p className="text-sm">Terminal {flight.arrival.terminal}</p>
             )}

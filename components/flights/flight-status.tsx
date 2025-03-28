@@ -1,30 +1,8 @@
 "use client";
 
-import { differenceInHours, format, parseISO } from "date-fns";
-import { Card } from "../ui/card";
-
-import { ArrowUpRightSmallIcon } from "../custom/icons";
-
-const SAMPLE = {
-  flightNumber: "BA142",
-  departure: {
-    cityName: "London",
-    airportCode: "LHR",
-    airportName: "London Heathrow Airport",
-    timestamp: "2024-10-08T18:30:00Z",
-    terminal: "5",
-    gate: "A10",
-  },
-  arrival: {
-    cityName: "New York",
-    airportCode: "JFK",
-    airportName: "John F. Kennedy International Airport",
-    timestamp: "2024-10-09T07:30:00Z",
-    terminal: "7",
-    gate: "B22",
-  },
-  totalDistanceInMiles: 3450,
-};
+import { format, parseISO } from "date-fns";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 
 interface FlightStatusProps {
   flightStatus?: {
@@ -34,18 +12,19 @@ interface FlightStatusProps {
       airportCode: string;
       airportName: string;
       timestamp: string;
-      terminal: string;
-      gate: string;
+      terminal?: string;
+      gate?: string;
     };
     arrival: {
       cityName: string;
       airportCode: string;
       airportName: string;
       timestamp: string;
-      terminal: string;
-      gate: string;
+      terminal?: string;
+      gate?: string;
     };
-    totalDistanceInMiles: number;
+    totalDistanceInMiles?: number;
+    error?: string;
   };
 }
 
@@ -94,86 +73,98 @@ export function Row({ row = SAMPLE.arrival, type = "arrival" }) {
 export function FlightStatus({ flightStatus }: FlightStatusProps) {
   if (!flightStatus) {
     return (
-      <Card className="p-4 skeleton">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">Flight Status</h3>
-          <div className="text-lg font-mono">XX1234</div>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <div className="text-sm">Departure</div>
-            <div className="text-lg font-semibold">City</div>
-            <div className="text-sm">Airport (XXX)</div>
-            <div className="text-sm">00:00 AM</div>
-            <div className="text-sm">Terminal X, Gate X</div>
+      <Card className="w-full">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Flight Status</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-24 animate-pulse flex items-center justify-center bg-muted rounded-md">
+            <p className="text-sm text-muted-foreground">Loading flight status...</p>
           </div>
-          <div className="space-y-1">
-            <div className="text-sm">Arrival</div>
-            <div className="text-lg font-semibold">City</div>
-            <div className="text-sm">Airport (XXX)</div>
-            <div className="text-sm">00:00 AM</div>
-            <div className="text-sm">Terminal X, Gate X</div>
-          </div>
-        </div>
+        </CardContent>
       </Card>
     );
   }
 
-  const formatTime = (timestamp: string) => {
-    try {
-      return format(parseISO(timestamp), "h:mm a");
-    } catch (e) {
-      return "Time unavailable";
-    }
-  };
+  if (flightStatus.error) {
+    return (
+      <Card className="w-full">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Flight Status</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-200 p-4 rounded-md">
+            <p>Error retrieving flight status</p>
+            <p className="text-sm">{flightStatus.error}</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
-  const formatDate = (timestamp: string) => {
+  function formatDate(dateString: string): string {
     try {
-      return format(parseISO(timestamp), "MMM d, yyyy");
-    } catch (e) {
-      return "Date unavailable";
+      return format(parseISO(dateString), "MMM d, yyyy h:mm a");
+    } catch {
+      return dateString;
     }
-  };
+  }
 
   return (
-    <Card className="p-4">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-lg font-semibold">Flight Status</h3>
-        <div className="text-lg font-mono">{flightStatus.flightNumber}</div>
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1">
-          <div className="text-sm text-muted-foreground">Departure</div>
-          <div className="text-lg font-semibold">{flightStatus.departure.cityName}</div>
-          <div className="text-sm">{flightStatus.departure.airportName} ({flightStatus.departure.airportCode})</div>
-          <div className="text-sm">
-            {formatTime(flightStatus.departure.timestamp)} on {formatDate(flightStatus.departure.timestamp)}
+    <Card className="w-full">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex justify-between items-center">
+          <span>Flight {flightStatus.flightNumber}</span>
+          {flightStatus.totalDistanceInMiles && (
+            <span className="text-sm font-normal text-muted-foreground">
+              {flightStatus.totalDistanceInMiles} miles
+            </span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 gap-6">
+          <div>
+            <h3 className="font-semibold mb-1">Departure</h3>
+            <p className="text-lg">{flightStatus.departure.cityName}</p>
+            <p className="text-sm text-muted-foreground">
+              {flightStatus.departure.airportName} ({flightStatus.departure.airportCode})
+            </p>
+            <p className="text-sm">{formatDate(flightStatus.departure.timestamp)}</p>
+            
+            {(flightStatus.departure.terminal || flightStatus.departure.gate) && (
+              <div className="mt-2 text-sm">
+                {flightStatus.departure.terminal && (
+                  <p>Terminal: {flightStatus.departure.terminal}</p>
+                )}
+                {flightStatus.departure.gate && (
+                  <p>Gate: {flightStatus.departure.gate}</p>
+                )}
+              </div>
+            )}
           </div>
-          <div className="text-sm">
-            {flightStatus.departure.terminal && `Terminal ${flightStatus.departure.terminal}`}
-            {flightStatus.departure.terminal && flightStatus.departure.gate && ', '}
-            {flightStatus.departure.gate && `Gate ${flightStatus.departure.gate}`}
+          
+          <div>
+            <h3 className="font-semibold mb-1">Arrival</h3>
+            <p className="text-lg">{flightStatus.arrival.cityName}</p>
+            <p className="text-sm text-muted-foreground">
+              {flightStatus.arrival.airportName} ({flightStatus.arrival.airportCode})
+            </p>
+            <p className="text-sm">{formatDate(flightStatus.arrival.timestamp)}</p>
+            
+            {(flightStatus.arrival.terminal || flightStatus.arrival.gate) && (
+              <div className="mt-2 text-sm">
+                {flightStatus.arrival.terminal && (
+                  <p>Terminal: {flightStatus.arrival.terminal}</p>
+                )}
+                {flightStatus.arrival.gate && (
+                  <p>Gate: {flightStatus.arrival.gate}</p>
+                )}
+              </div>
+            )}
           </div>
         </div>
-        <div className="space-y-1">
-          <div className="text-sm text-muted-foreground">Arrival</div>
-          <div className="text-lg font-semibold">{flightStatus.arrival.cityName}</div>
-          <div className="text-sm">{flightStatus.arrival.airportName} ({flightStatus.arrival.airportCode})</div>
-          <div className="text-sm">
-            {formatTime(flightStatus.arrival.timestamp)} on {formatDate(flightStatus.arrival.timestamp)}
-          </div>
-          <div className="text-sm">
-            {flightStatus.arrival.terminal && `Terminal ${flightStatus.arrival.terminal}`}
-            {flightStatus.arrival.terminal && flightStatus.arrival.gate && ', '}
-            {flightStatus.arrival.gate && `Gate ${flightStatus.arrival.gate}`}
-          </div>
-        </div>
-      </div>
-      {flightStatus.totalDistanceInMiles > 0 && (
-        <div className="mt-4 text-sm text-muted-foreground">
-          Flight distance: {flightStatus.totalDistanceInMiles.toLocaleString()} miles
-        </div>
-      )}
+      </CardContent>
     </Card>
   );
 }

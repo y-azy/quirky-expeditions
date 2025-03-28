@@ -1,185 +1,168 @@
 "use client";
 
-import { format, parseISO } from "date-fns";
-import { Card } from "../ui/card";
-import { Button } from "../ui/button";
 import { useState } from "react";
-import { toast } from "sonner";
+import { format, parseISO } from "date-fns";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { CreditCard } from "lucide-react";
 
-interface ReservationProps {
+interface CreateReservationProps {
   reservation?: {
     id: string;
-    seats: string[];
-    flightNumber: string;
-    departure: {
-      cityName: string;
-      airportCode: string;
-      timestamp: string;
-      gate?: string;
-      terminal?: string;
-    };
-    arrival: {
-      cityName: string;
-      airportCode: string;
-      timestamp: string;
-      gate?: string;
-      terminal?: string;
-    };
-    passengerName: string;
-    totalPriceInUSD: number;
-    hasCompletedPayment: boolean;
+    seats?: string[];
+    flightNumber?: string;
+    totalPriceInUSD?: number;
+    hasCompletedPayment?: boolean;
     error?: string;
+    departure?: {
+      cityName: string;
+      airportCode: string;
+      timestamp: string;
+      gate?: string;
+      terminal?: string;
+    };
+    arrival?: {
+      cityName: string;
+      airportCode: string;
+      timestamp: string;
+      gate?: string;
+      terminal?: string;
+    };
+    passengerName?: string;
   };
 }
 
-export function CreateReservation({ reservation }: ReservationProps) {
-  const [isConfirming, setIsConfirming] = useState(false);
-
+export function CreateReservation({ reservation }: CreateReservationProps) {
+  const [isButtonClicked, setIsButtonClicked] = useState(false);
+  
   if (!reservation) {
-    // Skeleton loading state
     return (
-      <Card className="p-6 skeleton">
-        <h3 className="text-xl font-semibold mb-4">Reservation Details</h3>
-        <div className="space-y-4">
-          <div className="flex justify-between">
-            <div className="text-lg">Flight</div>
-            <div className="text-lg">XX1234</div>
+      <Card className="w-full">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Reservation</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-40 animate-pulse flex items-center justify-center bg-muted rounded-md">
+            <p className="text-sm text-muted-foreground">Creating reservation...</p>
           </div>
-          <div className="flex justify-between">
-            <div className="text-lg">Passenger</div>
-            <div className="text-lg">Passenger Name</div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <div className="text-sm">From</div>
-              <div className="text-lg">City (XXX)</div>
-              <div className="text-sm">Date</div>
-            </div>
-            <div className="space-y-1">
-              <div className="text-sm">To</div>
-              <div className="text-lg">City (XXX)</div>
-              <div className="text-sm">Date</div>
-            </div>
-          </div>
-          <div className="flex justify-between border-t pt-4">
-            <div className="text-lg font-semibold">Total Price</div>
-            <div className="text-lg font-semibold">$000.00</div>
-          </div>
-        </div>
+        </CardContent>
       </Card>
     );
   }
 
   if (reservation.error) {
     return (
-      <Card className="p-6 border-destructive">
-        <div className="text-destructive font-semibold">Error</div>
-        <p>{reservation.error}</p>
+      <Card className="w-full">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Reservation</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-200 p-4 rounded-md">
+            <p>Error creating reservation</p>
+            <p className="text-sm">{reservation.error}</p>
+          </div>
+        </CardContent>
       </Card>
     );
   }
 
-  const formatDateTime = (timestamp: string) => {
-    try {
-      return format(parseISO(timestamp), "MMM d, yyyy h:mm a");
-    } catch {
-      return "Time unavailable";
-    }
-  };
+  if (!reservation.id || !reservation.flightNumber || !reservation.departure || !reservation.arrival) {
+    return (
+      <Card className="w-full">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Reservation</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-200 p-4 rounded-md">
+            <p>Invalid reservation data</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
-  const handleConfirm = async () => {
-    setIsConfirming(true);
+  function formatDate(dateString: string): string {
     try {
-      const response = await fetch(`/api/reservation?id=${reservation.id}`, {
-        method: 'GET',
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to confirm reservation');
-      }
-      
-      toast.success('Reservation confirmed!');
-    } catch (error) {
-      toast.error('Failed to confirm reservation. Please try again.');
-    } finally {
-      setIsConfirming(false);
+      return format(parseISO(dateString), "MMM d, yyyy h:mm a");
+    } catch {
+      return dateString;
+    }
+  }
+
+  const handleProceedToPayment = () => {
+    setIsButtonClicked(true);
+    
+    const message = `I'd like to proceed with payment for reservation ${reservation.id}`;
+    const textarea = document.querySelector('textarea');
+    if (textarea) {
+      textarea.value = message;
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.focus();
     }
   };
 
   return (
-    <Card className="p-6 bg-primary/5">
-      <h3 className="text-xl font-semibold mb-4">Reservation Details</h3>
-      <div className="space-y-4">
-        <div className="flex justify-between">
-          <div className="text-lg font-medium">Flight</div>
-          <div className="text-lg font-mono">{reservation.flightNumber}</div>
+    <Card className="w-full">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg">Reservation Confirmed</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-200 p-3 rounded-md text-sm">
+          Your reservation has been created and is awaiting payment.
         </div>
         
-        <div className="flex justify-between">
-          <div className="text-lg font-medium">Passenger</div>
-          <div className="text-lg">{reservation.passengerName}</div>
+        <div className="space-y-1">
+          <p className="text-sm text-muted-foreground">Reservation ID</p>
+          <p className="font-mono">{reservation.id}</p>
         </div>
         
-        <div className="flex justify-between">
-          <div className="text-lg font-medium">Seats</div>
-          <div className="text-lg font-mono">{reservation.seats.join(", ")}</div>
+        <div className="space-y-1">
+          <p className="text-sm text-muted-foreground">Flight Details</p>
+          <div className="font-medium">{reservation.flightNumber}</div>
+          <div className="grid grid-cols-2 gap-4 mt-2">
+            <div>
+              <div className="text-sm text-muted-foreground">From</div>
+              <div>{reservation.departure.cityName} ({reservation.departure.airportCode})</div>
+              <div className="text-sm">{formatDate(reservation.departure.timestamp)}</div>
+            </div>
+            <div>
+              <div className="text-sm text-muted-foreground">To</div>
+              <div>{reservation.arrival.cityName} ({reservation.arrival.airportCode})</div>
+              <div className="text-sm">{formatDate(reservation.arrival.timestamp)}</div>
+            </div>
+          </div>
         </div>
         
-        <div className="grid grid-cols-2 gap-4">
+        {reservation.seats && reservation.seats.length > 0 && (
           <div className="space-y-1">
-            <div className="text-sm text-muted-foreground">From</div>
-            <div className="text-lg font-medium">
-              {reservation.departure.cityName} ({reservation.departure.airportCode})
-            </div>
-            <div className="text-sm">
-              {formatDateTime(reservation.departure.timestamp)}
-            </div>
-            {(reservation.departure.terminal || reservation.departure.gate) && (
-              <div className="text-sm">
-                {reservation.departure.terminal && `Terminal ${reservation.departure.terminal}`}
-                {reservation.departure.terminal && reservation.departure.gate && ', '}
-                {reservation.departure.gate && `Gate ${reservation.departure.gate}`}
-              </div>
-            )}
+            <p className="text-sm text-muted-foreground">Selected Seats</p>
+            <p>{reservation.seats.join(', ')}</p>
           </div>
-          
+        )}
+        
+        {reservation.passengerName && (
           <div className="space-y-1">
-            <div className="text-sm text-muted-foreground">To</div>
-            <div className="text-lg font-medium">
-              {reservation.arrival.cityName} ({reservation.arrival.airportCode})
-            </div>
-            <div className="text-sm">
-              {formatDateTime(reservation.arrival.timestamp)}
-            </div>
-            {(reservation.arrival.terminal || reservation.arrival.gate) && (
-              <div className="text-sm">
-                {reservation.arrival.terminal && `Terminal ${reservation.arrival.terminal}`}
-                {reservation.arrival.terminal && reservation.arrival.gate && ', '}
-                {reservation.arrival.gate && `Gate ${reservation.arrival.gate}`}
-              </div>
-            )}
+            <p className="text-sm text-muted-foreground">Passenger</p>
+            <p>{reservation.passengerName}</p>
           </div>
-        </div>
+        )}
         
-        <div className="flex justify-between border-t pt-4">
-          <div className="text-lg font-semibold">Total Price</div>
-          <div className="text-lg font-semibold">
-            ${reservation.totalPriceInUSD.toFixed(2)}
-          </div>
+        <div className="space-y-1">
+          <p className="text-sm text-muted-foreground">Total Price</p>
+          <p className="text-lg font-semibold">${reservation.totalPriceInUSD?.toFixed(2) || "0.00"}</p>
         </div>
-        
+      </CardContent>
+      <CardFooter className="border-t pt-4">
         <Button 
-          onClick={handleConfirm} 
-          disabled={isConfirming || reservation.hasCompletedPayment}
-          className="w-full"
+          onClick={handleProceedToPayment}
+          disabled={isButtonClicked || reservation.hasCompletedPayment}
+          className="w-full gap-2"
         >
-          {isConfirming 
-            ? "Processing..." 
-            : reservation.hasCompletedPayment 
-              ? "Payment Completed" 
-              : "Confirm and Proceed to Payment"}
+          <CreditCard className="size-4" />
+          {reservation.hasCompletedPayment ? "Payment Completed" : "Proceed to Payment"}
         </Button>
-      </div>
+      </CardFooter>
     </Card>
   );
 }

@@ -15,6 +15,7 @@ import { FlightStatus } from "../flights/flight-status";
 import { ListFlights } from "../flights/list-flights";
 import { SelectSeats } from "../flights/select-seats";
 import { VerifyPayment } from "../flights/verify-payment";
+import { ErrorMessage } from "./error-message";
 
 export const Message = ({
   chatId,
@@ -53,6 +54,29 @@ export const Message = ({
 
               if (state === "result") {
                 const { result } = toolInvocation;
+                
+                // Check for error states
+                if (result && (result.error || result.status === "error")) {
+                  return (
+                    <ErrorMessage 
+                      key={toolCallId}
+                      message={result.message || "There was a problem processing your request."}
+                      error={result.error}
+                      type="error"
+                    />
+                  );
+                }
+
+                // Check for no results state
+                if (result && result.status === "no_results") {
+                  return (
+                    <ErrorMessage 
+                      key={toolCallId}
+                      message={result.message || "No results found for your request."}
+                      type="info"
+                    />
+                  );
+                }
 
                 return (
                   <div key={toolCallId}>
@@ -61,21 +85,52 @@ export const Message = ({
                     ) : toolName === "displayFlightStatus" ? (
                       <FlightStatus flightStatus={result} />
                     ) : toolName === "searchFlights" ? (
-                      <ListFlights chatId={chatId} results={result} />
+                      result.flights && result.flights.length > 0 ? (
+                        <ListFlights chatId={chatId} results={result} />
+                      ) : (
+                        <ErrorMessage 
+                          message={result.message || "No flights found matching your criteria."}
+                          type="info"
+                        />
+                      )
                     ) : toolName === "selectSeats" ? (
-                      <SelectSeats chatId={chatId} availability={result} />
+                      result.seats && result.seats.length > 0 ? (
+                        <SelectSeats chatId={chatId} availability={result} />
+                      ) : (
+                        <ErrorMessage 
+                          message={result.message || "No seat information available for this flight."}
+                          type="info"
+                        />
+                      )
                     ) : toolName === "createReservation" ? (
-                      Object.keys(result).includes("error") ? null : (
+                      Object.keys(result).includes("error") ? (
+                        <ErrorMessage 
+                          message={result.message || "Failed to create reservation."}
+                          error={result.error}
+                          type="error"
+                        />
+                      ) : (
                         <CreateReservation reservation={result} />
                       )
                     ) : toolName === "authorizePayment" ? (
                       <AuthorizePayment intent={result} />
                     ) : toolName === "displayBoardingPass" ? (
-                      <DisplayBoardingPass boardingPass={result} />
+                      Object.keys(result).includes("error") ? (
+                        <ErrorMessage 
+                          message={result.message || "Cannot display boarding pass."}
+                          error={result.error}
+                          type="error"
+                        />
+                      ) : (
+                        <DisplayBoardingPass boardingPass={result} />
+                      )
                     ) : toolName === "verifyPayment" ? (
                       <VerifyPayment result={result} />
                     ) : (
-                      <div>{JSON.stringify(result, null, 2)}</div>
+                      // For any other tool types, display the JSON result in a pre tag
+                      <pre className="text-xs bg-gray-100 dark:bg-gray-800 p-2 rounded overflow-auto max-h-[300px]">
+                        {JSON.stringify(result, null, 2)}
+                      </pre>
                     )}
                   </div>
                 );

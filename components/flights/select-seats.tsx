@@ -1,215 +1,224 @@
 "use client";
 
 import { useState } from "react";
-import { Card } from "../ui/card";
-import { Button } from "../ui/button";
-import { toast } from "sonner";
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { CheckCircle } from "lucide-react";
 
-interface SeatMapResponse {
-  flightNumber: string;
-  flightOfferId: string;
-  seats: Array<{
-    seatNumber: string;
-    priceInUSD: number;
-    isAvailable: boolean;
-    cabin: string;
-  }>;
+interface Seat {
+  seatNumber: string;
+  priceInUSD: number;
+  isAvailable: boolean;
+  cabin: string;
 }
 
-export function SelectSeats({
-  chatId,
-  availability = {
-    flightNumber: "AA123",
-    flightOfferId: "sample-id",
-    seats: Array(30)
-      .fill(null)
-      .map((_, index) => ({
-        seatNumber: `${Math.floor(index / 6) + 1}${String.fromCharCode(
-          (index % 6) + 65,
-        )}`,
-        priceInUSD: Math.random() * 100 + 25,
-        isAvailable: Math.random() > 0.3,
-        cabin: Math.random() > 0.7 ? "BUSINESS" : "ECONOMY",
-      })),
-  },
-}: {
-  chatId: string;
-  availability?: SeatMapResponse;
-}) {
-  const [selectedSeats, setSelectedSeats] = useState<Array<string>>([]);
-  const [isSaving, setIsSaving] = useState(false);
-  const [cabinFilter, setCabinFilter] = useState<string | null>(null);
+interface SelectSeatsProps {
+  chatId?: string;
+  availability?: {
+    flightNumber?: string;
+    flightOfferId?: string;
+    seats?: Seat[];
+    error?: string;
+    message?: string;
+  };
+}
 
-  // Group seats by row
-  const seatRows = availability.seats.reduce(
-    (acc, seat) => {
-      // Extract row number from seat number (e.g., "12A" -> "12")
-      const row = seat.seatNumber.replace(/[A-Z]/g, "");
-      
-      if (!acc[row]) {
-        acc[row] = [];
-      }
-      
-      acc[row].push(seat);
-      return acc;
-    },
-    {} as Record<string, Array<any>>
-  );
+export function SelectSeats({ chatId, availability }: SelectSeatsProps) {
+  const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
   
-  // Get unique cabin types
-  const cabinTypes = [...new Set(availability.seats.map(seat => seat.cabin))];
+  if (!availability) {
+    return (
+      <Card className="w-full">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Select Seats</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-32 animate-pulse flex items-center justify-center bg-muted rounded-md">
+            <p className="text-sm text-muted-foreground">Loading seat map...</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
-  // Filter seats by cabin if needed
-  const filteredSeatRows = cabinFilter 
-    ? Object.fromEntries(
-        Object.entries(seatRows).map(([row, seats]) => [
-          row,
-          seats.filter(seat => seat.cabin === cabinFilter)
-        ])
-      )
-    : seatRows;
+  if (availability.error) {
+    return (
+      <Card className="w-full">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Select Seats</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-200 p-4 rounded-md">
+            <p>Error retrieving seat map</p>
+            <p className="text-sm">{availability.error}</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
-  const handleSelectSeat = (seatNumber: string) => {
-    if (selectedSeats.includes(seatNumber)) {
-      setSelectedSeats(selectedSeats.filter((s) => s !== seatNumber));
-    } else {
-      setSelectedSeats([...selectedSeats, seatNumber]);
+  if (!availability.seats || availability.seats.length === 0) {
+    return (
+      <Card className="w-full">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg">Select Seats</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="bg-blue-100 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 p-4 rounded-md">
+            <p>No seat information available for this flight.</p>
+            {availability.message && <p className="text-sm mt-1">{availability.message}</p>}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const flightNumber = availability.flightNumber || "Unknown";
+  
+  // Group seats by cabin type
+  const cabinGroups = availability.seats.reduce((groups: Record<string, Seat[]>, seat) => {
+    if (!groups[seat.cabin]) {
+      groups[seat.cabin] = [];
     }
-  };
+    groups[seat.cabin].push(seat);
+    return groups;
+  }, {});
 
-  const getTotalPrice = () => {
-    return selectedSeats.reduce((total, seatNumber) => {
-      const seat = availability.seats.find((s) => s.seatNumber === seatNumber);
-      return total + (seat?.priceInUSD || 0);
-    }, 0);
-  };
-
-  const handleSaveSeats = async () => {
-    if (selectedSeats.length === 0) {
-      toast.error("Please select at least one seat");
-      return;
-    }
-
-    setIsSaving(true);
-
-    try {
-      const result = await fetch(`/api/chat/${chatId}/select-seats`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          flightNumber: availability.flightNumber,
-          flightOfferId: availability.flightOfferId,
-          seats: selectedSeats,
-        }),
-      });
-
-      if (!result.ok) {
-        const error = await result.text();
-        throw new Error(error);
+  // Helper function to organize seats in rows (assuming seats are named like 1A, 1B, etc.)
+  const organizeSeatsInRows = (seats: Seat[]) => {
+    const rows: Record<string, Seat[]> = {};
+    
+    seats.forEach(seat => {
+      // Extract row number (e.g., "1" from "1A")
+      const rowNumber = seat.seatNumber.replace(/[A-Z]/g, '');
+      
+      if (!rows[rowNumber]) {
+        rows[rowNumber] = [];
       }
       
-      toast.success(`Seats ${selectedSeats.join(", ")} selected successfully`);
-    } catch (error) {
-      if (error instanceof Error) {
-        toast.error(error.message);
-      } else {
-        toast.error("Failed to save seat selection");
-      }
-    } finally {
-      setIsSaving(false);
+      rows[rowNumber].push(seat);
+    });
+    
+    // Sort seat positions within each row
+    Object.keys(rows).forEach(rowNumber => {
+      rows[rowNumber].sort((a, b) => {
+        const aLetter = a.seatNumber.replace(/[0-9]/g, '');
+        const bLetter = b.seatNumber.replace(/[0-9]/g, '');
+        return aLetter.localeCompare(bLetter);
+      });
+    });
+    
+    return rows;
+  };
+
+  const handleSeatClick = (seatNumber: string) => {
+    setSelectedSeats(prev => 
+      prev.includes(seatNumber)
+        ? prev.filter(s => s !== seatNumber)
+        : [...prev, seatNumber]
+    );
+  };
+
+  const handleConfirm = () => {
+    if (!chatId || selectedSeats.length === 0) return;
+    
+    const message = `I want to book these seats: ${selectedSeats.join(', ')} for flight ${flightNumber}`;
+    const textarea = document.querySelector('textarea');
+    if (textarea) {
+      textarea.value = message;
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.focus();
     }
   };
 
-  const getCabinLabel = (cabin: string) => {
-    const labels: Record<string, string> = {
-      'ECONOMY': 'Economy',
-      'PREMIUM_ECONOMY': 'Premium Economy',
-      'BUSINESS': 'Business',
-      'FIRST': 'First'
-    };
-    return labels[cabin] || cabin.charAt(0) + cabin.slice(1).toLowerCase();
-  };
-
-  // Helper to get seat color based on cabin
-  const getSeatColor = (seat: any) => {
-    if (!seat.isAvailable) return "bg-gray-200 text-gray-400 border-gray-300 cursor-not-allowed";
-    if (selectedSeats.includes(seat.seatNumber)) return "bg-primary text-white";
-    
-    const cabinColors: Record<string, string> = {
-      'ECONOMY': "bg-green-100 hover:bg-green-200 border-green-200",
-      'PREMIUM_ECONOMY': "bg-blue-100 hover:bg-blue-200 border-blue-200",
-      'BUSINESS': "bg-purple-100 hover:bg-purple-200 border-purple-200",
-      'FIRST': "bg-amber-100 hover:bg-amber-200 border-amber-200"
-    };
-    
-    return cabinColors[seat.cabin] || "bg-gray-100 hover:bg-gray-200 border-gray-200";
-  };
+  // Calculate total price for selected seats
+  const totalPrice = selectedSeats.reduce((sum, seatNumber) => {
+    const seat = availability.seats?.find(s => s.seatNumber === seatNumber);
+    return sum + (seat?.priceInUSD || 0);
+  }, 0);
 
   return (
-    <Card className="p-4 flex flex-col gap-4">
-      <div className="flex justify-between items-center">
-        <h3 className="text-lg font-semibold">Select Seats - {availability.flightNumber}</h3>
-        <div className="text-sm">
-          Selected seats: {selectedSeats.length > 0 ? selectedSeats.join(", ") : "None"}
-        </div>
-      </div>
-      
-      <div className="flex gap-2 overflow-x-auto pb-2">
-        <Button 
-          variant={cabinFilter === null ? "default" : "outline"}
-          size="sm"
-          onClick={() => setCabinFilter(null)}
-        >
-          All
-        </Button>
-        {cabinTypes.map(cabin => (
-          <Button
-            key={cabin}
-            variant={cabinFilter === cabin ? "default" : "outline"}
-            size="sm"
-            onClick={() => setCabinFilter(cabin)}
-          >
-            {getCabinLabel(cabin)}
-          </Button>
-        ))}
-      </div>
-
-      <div className="overflow-x-auto pb-4">
-        {Object.entries(filteredSeatRows).map(([row, seats]) => (
-          <div key={row} className="flex gap-2 mb-2">
-            <div className="w-6 flex items-center justify-center font-semibold text-sm">
-              {row}
+    <Card className="w-full">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg">
+          Select Seats for Flight {flightNumber}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {Object.entries(cabinGroups).map(([cabin, seats]) => {
+          const rows = organizeSeatsInRows(seats);
+          
+          return (
+            <div key={cabin} className="space-y-2">
+              <h3 className="font-medium">{cabin}</h3>
+              
+              <div className="space-y-2">
+                {Object.entries(rows).map(([rowNum, rowSeats]) => (
+                  <div key={rowNum} className="flex items-center gap-1 justify-center">
+                    <span className="text-xs text-muted-foreground w-6">{rowNum}</span>
+                    <div className="flex gap-1 flex-wrap justify-center">
+                      {rowSeats.map(seat => (
+                        <button
+                          key={seat.seatNumber}
+                          disabled={!seat.isAvailable}
+                          onClick={() => handleSeatClick(seat.seatNumber)}
+                          className={`
+                            size-10 flex flex-col items-center justify-center rounded-md text-xs
+                            ${!seat.isAvailable 
+                              ? 'bg-muted text-muted-foreground cursor-not-allowed' 
+                              : selectedSeats.includes(seat.seatNumber)
+                                ? 'bg-primary text-primary-foreground'
+                                : 'bg-secondary hover:bg-secondary/80 text-secondary-foreground'
+                            }
+                          `}
+                        >
+                          <span>{seat.seatNumber.replace(/[0-9]/g, '')}</span>
+                          <span>${seat.priceInUSD.toFixed(0)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="flex gap-2">
-              {seats.map(seat => (
-                <button
-                  key={seat.seatNumber}
-                  className={`w-12 h-12 p-1 border rounded-md flex flex-col items-center justify-center text-xs ${getSeatColor(seat)}`}
-                  disabled={!seat.isAvailable}
-                  onClick={() => handleSelectSeat(seat.seatNumber)}
-                >
-                  <span className="font-semibold">{seat.seatNumber.replace(/\d+/g, '')}</span>
-                  <span>${seat.priceInUSD.toFixed(0)}</span>
-                </button>
-              ))}
-            </div>
+          );
+        })}
+        
+        <div className="pt-2">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="size-4 bg-muted rounded-sm"></div>
+            <span>Unavailable</span>
+            
+            <div className="size-4 bg-secondary rounded-sm ml-4"></div>
+            <span>Available</span>
+            
+            <div className="size-4 bg-primary rounded-sm ml-4"></div>
+            <span>Selected</span>
           </div>
-        ))}
-      </div>
-
-      <div className="flex justify-between items-center mt-2">
-        <div className="font-semibold">
-          Total: ${getTotalPrice().toFixed(2)}
         </div>
+      </CardContent>
+      
+      <CardFooter className="flex justify-between border-t pt-4">
+        <div>
+          {selectedSeats.length > 0 ? (
+            <div className="space-y-1">
+              <div className="font-medium">Selected: {selectedSeats.join(', ')}</div>
+              <div className="text-sm text-muted-foreground">Total: ${totalPrice.toFixed(2)}</div>
+            </div>
+          ) : (
+            <div className="text-muted-foreground">No seats selected</div>
+          )}
+        </div>
+        
         <Button 
-          onClick={handleSaveSeats} 
-          disabled={selectedSeats.length === 0 || isSaving}
+          onClick={handleConfirm}
+          disabled={selectedSeats.length === 0}
+          className="gap-2"
         >
-          {isSaving ? "Saving..." : "Save Selection"}
+          <CheckCircle className="size-4" />
+          Confirm
         </Button>
-      </div>
+      </CardFooter>
     </Card>
   );
 }
