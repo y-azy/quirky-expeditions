@@ -14,22 +14,32 @@ export async function saveChatMessages(
   }
 
   try {
-    // Check if responseMessages is iterable
-    if (responseMessages && Symbol.iterator in Object(responseMessages)) {
-      await saveChat({
-        id,
-        messages: [...coreMessages, ...responseMessages],
-        userId: user.id,
-      });
-    } else {
-      // Handle case where responseMessages is not iterable
-      console.log("responseMessages is not iterable, saving only core messages");
-      await saveChat({
-        id,
-        messages: coreMessages,
-        userId: user.id,
-      });
+    // Ensure responseMessages is an array and handle various possible formats
+    let messagesToSave = [...coreMessages];
+    
+    if (responseMessages) {
+      // Check if responseMessages is a single message object
+      if (responseMessages.id && responseMessages.role && responseMessages.content) {
+        messagesToSave.push(responseMessages);
+      } 
+      // Check if it's an array or array-like object
+      else if (Array.isArray(responseMessages) || 
+               (typeof responseMessages === 'object' && responseMessages[Symbol.iterator])) {
+        try {
+          messagesToSave = [...messagesToSave, ...responseMessages];
+        } catch (error) {
+          console.error("Error converting responseMessages to array:", error);
+        }
+      } else {
+        console.warn("responseMessages is not in expected format:", responseMessages);
+      }
     }
+    
+    await saveChat({
+      id,
+      messages: messagesToSave,
+      userId: user.id,
+    });
   } catch (error) {
     console.error("Failed to save chat:", error);
   }

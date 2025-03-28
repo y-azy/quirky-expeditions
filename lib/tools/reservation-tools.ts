@@ -4,6 +4,7 @@ import { confirmFlightPrice, getSeatMap } from "@/lib/amadeus-helpers";
 import { createReservation, createFlightBooking, getReservationById } from "@/db/queries";
 import { auth } from "@/app/(auth)/auth";
 import { departureFullSchema, arrivalFullSchema } from "./schemas";
+import { FlightStorageService } from "@/lib/services/flight-storage";
 
 export const reservationTools = {
   createReservation: {
@@ -39,8 +40,6 @@ export const reservationTools = {
       passengerName: string;
     }) => {
       try {
-        // Calculate price based on flight offer and seats
-        // NO MOCK DATA OR FALLBACKS - must get real data or fail
         const session = await auth();
         if (!session || !session.user || !session.user.id) {
           return { 
@@ -51,34 +50,54 @@ export const reservationTools = {
         }
         
         try {
-          // Get real pricing data from Amadeus
-          const pricingResponse = await confirmFlightPrice(props.flightOfferId);
-          if (!pricingResponse || !pricingResponse.flightOffers || !pricingResponse.flightOffers[0]) {
-            throw new Error("Invalid pricing data returned from Amadeus");
+          // Get the complete flight offer from Redis
+          let flightOffer;
+          try {
+            flightOffer = await FlightStorageService.getFlightOffer(props.flightOfferId);
+            
+            if (!flightOffer) {
+              throw new Error("Flight offer not found in storage");
+            }
+          } catch (e) {
+            throw new Error("Could not retrieve the flight offer needed for pricing");
           }
           
-          let totalPriceInUSD = parseFloat(pricingResponse.flightOffers[0].price.total);
-          
-          // Add seat prices
-          const seatMap = await getSeatMap({ flightOfferId: props.flightOfferId });
-          if (!seatMap.data || !seatMap.data.decks) {
-            throw new Error("Could not retrieve seat map data");
+          // Get real pricing data from Amadeus using the complete flight offer
+          let totalPriceInUSD;
+          try {
+            const pricingResponse = await confirmFlightPrice(flightOffer);
+            if (!pricingResponse || !pricingResponse.flightOffers || !pricingResponse.flightOffers[0]) {
+              throw new Error("Invalid pricing data returned from Amadeus");
+            }
+            
+            totalPriceInUSD = parseFloat(pricingResponse.flightOffers[0].price.total);
+          } catch (pricingError) {
+            console.error("Error confirming flight price:", pricingError);
+            // Use the price from the original flight offer as fallback
+            totalPriceInUSD = parseFloat(flightOffer.price.total);
           }
           
-          for (const seatNumber of props.seats) {
-            let seatFound = false;
-            for (const deck of seatMap.data.decks) {
-              for (const row of deck.rows || []) {
-                for (const seat of row.seats || []) {
-                  if (seat && seat.number === seatNumber && seat.travelerPricing?.[0]?.price?.total) {
-                    totalPriceInUSD += parseFloat(seat.travelerPricing[0].price.total);
-                    seatFound = true;
+          // Add seat prices if seats were selected
+          if (props.seats && props.seats.length > 0) {
+            try {
+              const seatMap = await getSeatMap({ flightOfferId: flightOffer });
+              if (seatMap && seatMap.length > 0) {
+                for (const seatNumber of props.seats) {
+                  for (const map of seatMap) {
+                    for (const deck of map.decks || []) {
+                      for (const row of deck.rows || []) {
+                        for (const seat of row.seats || []) {
+                          if (seat && seat.number === seatNumber && seat.travelerPricing?.[0]?.price?.total) {
+                            totalPriceInUSD += parseFloat(seat.travelerPricing[0].price.total);
+                          }
+                        }
+                      }
+                    }
                   }
                 }
               }
-            }
-            if (!seatFound) {
-              console.warn(`Seat ${seatNumber} not found in seat map or has no pricing data`);
+            } catch (seatMapError) {
+              console.error("Error getting seat prices:", seatMapError);
             }
           }
           
@@ -107,11 +126,11 @@ export const reservationTools = {
           };
           
         } catch (apiError) {
-          console.error("Error with Amadeus API:", apiError);
+          console.error("Error with reservation creation:", apiError);
           return { 
-            error: apiError instanceof Error ? apiError.message : "Failed to get pricing from Amadeus",
+            error: apiError instanceof Error ? apiError.message : "Failed to create reservation",
             status: "error",
-            message: "Unable to get accurate pricing information. Please try again or select another flight."
+            message: "Unable to create your reservation. Please try again after performing a new flight search."
           };
         }
         

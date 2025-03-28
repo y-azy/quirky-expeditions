@@ -8,6 +8,7 @@ import {
   getCheapestFlightDates
 } from "@/lib/amadeus-helpers";
 import { departureFullSchema, arrivalFullSchema } from "./schemas";
+import { FlightStorageService } from "@/lib/services/flight-storage";
 
 export const flightTools = {
   displayFlightStatus: {
@@ -113,9 +114,16 @@ export const flightTools = {
             flightNumber: `${firstSegment.carrierCode}${firstSegment.number}`,
             priceInUSD: parseFloat(offer.price.total),
             numberOfStops: offer.itineraries[0].segments.length - 1,
-            raw: offer // Store raw offer for later use
+            rawOffer: offer // Store the COMPLETE flight offer for later use
           };
         });
+
+        // Store raw offers in Redis for later retrieval
+        try {
+          await FlightStorageService.storeFlightOffers(flightOffers);
+        } catch (storageError) {
+          console.warn("Could not store flight offers:", storageError);
+        }
 
         return { flights };
       } catch (error) {
@@ -140,31 +148,34 @@ export const flightTools = {
       flightOfferId: string 
     }) => {
       try {
-        // Validate flightOfferId to prevent API errors
-        if (!flightOfferId || flightOfferId === "1") {
-          return { 
-            flightNumber,
-            flightOfferId,
-            seats: [],
-            status: "no_seats",
-            message: "No seat information available for this flight."
-          };
+        // Get the raw flight offer from Redis
+        let flightOffer;
+        try {
+          flightOffer = await FlightStorageService.getFlightOffer(flightOfferId);
+          
+          if (!flightOffer) {
+            throw new Error("Flight offer not found in storage");
+          }
+        } catch (e) {
+          throw new Error("Could not retrieve the complete flight offer needed for seat maps");
         }
         
-        const seatMap = await getSeatMap({ flightOfferId });
+        const seatMap = await getSeatMap({ flightOfferId: flightOffer });
         const seats = [];
         
-        if (seatMap.data && seatMap.data.decks) {
-          for (const deck of seatMap.data.decks) {
-            for (const row of deck.rows || []) {
-              for (const seat of row.seats || []) {
-                if (seat) {
-                  seats.push({
-                    seatNumber: seat.number,
-                    priceInUSD: parseFloat(seat.travelerPricing?.[0]?.price?.total || '0'),
-                    isAvailable: seat.travelerPricing?.[0]?.status === 'AVAILABLE',
-                    cabin: seat.travelerPricing?.[0]?.cabin || seat.cabin || 'ECONOMY'
-                  });
+        if (seatMap && seatMap.length > 0) {
+          for (const map of seatMap) {
+            for (const deck of map.decks || []) {
+              for (const row of deck.rows || []) {
+                for (const seat of row.seats || []) {
+                  if (seat) {
+                    seats.push({
+                      seatNumber: seat.number,
+                      priceInUSD: parseFloat(seat.travelerPricing?.[0]?.price?.total || '0'),
+                      isAvailable: seat.travelerPricing?.[0]?.status === 'AVAILABLE',
+                      cabin: seat.travelerPricing?.[0]?.cabin || seat.cabin || 'ECONOMY'
+                    });
+                  }
                 }
               }
             }
@@ -186,7 +197,7 @@ export const flightTools = {
           seats: [],
           error: error instanceof Error ? error.message : "Unable to retrieve seat map information",
           status: "error",
-          message: "Unable to retrieve seat map information at this time."
+          message: "Unable to retrieve seat map information. The complete flight offer is required."
         };
       }
     },

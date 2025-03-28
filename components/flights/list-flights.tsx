@@ -22,6 +22,7 @@ interface Flight {
   flightNumber: string;
   priceInUSD: number;
   numberOfStops: number;
+  rawOffer?: any; // Add this line to include rawOffer in the Flight interface
 }
 
 interface ListFlightsProps {
@@ -149,6 +150,15 @@ export function ListFlights({ chatId, results }: ListFlightsProps) {
               <span className="font-semibold text-lg">${flight.priceInUSD.toFixed(2)}</span>
               <Button size="sm" 
                 onClick={() => {
+                  // Store the complete flight offer in a session variable
+                  if (typeof window !== 'undefined' && flight.rawOffer) {
+                    try {
+                      sessionStorage.setItem('selectedFlightOffer', JSON.stringify(flight.rawOffer));
+                    } catch (e) {
+                      console.error("Failed to store flight offer:", e);
+                    }
+                  }
+                  
                   // Select this flight for seat selection
                   if (chatId) {
                     const message = `I'd like to book flight ${flight.flightNumber} from ${flight.departure.cityName} to ${flight.arrival.cityName} for $${flight.priceInUSD.toFixed(2)}`;
@@ -156,8 +166,6 @@ export function ListFlights({ chatId, results }: ListFlightsProps) {
                     if (textarea) {
                       textarea.value = message;
                       textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                      
-                      // Focus the textarea
                       textarea.focus();
                     }
                   }

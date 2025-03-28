@@ -1,5 +1,6 @@
 import { getSeatMap } from "@/lib/amadeus-helpers";
 import { auth } from "@/app/(auth)/auth";
+import { FlightStorageService } from "@/lib/services/flight-storage";
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -17,23 +18,48 @@ export async function GET(request: Request) {
   }
 
   try {
-    const seatMap = await getSeatMap({ 
-      flightOfferId: flightOfferId || undefined,
-      flightOrderId: flightOrderId || undefined 
-    });
-    
-    return Response.json(seatMap);
-  } catch (error) {
-    console.error("Error fetching seat map:", error);
-    
-    if (error instanceof Error) {
-      return Response.json({
-        error: error.message || "Unable to retrieve seat map information"
-      }, { status: 500 });
+    if (flightOfferId) {
+      // Get the full flight offer from Redis
+      const flightOffer = await FlightStorageService.getFlightOffer(flightOfferId);
+      
+      if (!flightOffer) {
+        return Response.json({
+          error: "Flight offer not found. Please perform a new flight search.",
+          status: "error"
+        }, { status: 404 });
+      }
+      
+      try {
+        const seatMap = await getSeatMap({ flightOfferId: flightOffer });
+        return Response.json(seatMap);
+      } catch (error) {
+        console.error("Error fetching seat map:", error);
+        return Response.json({
+          error: error instanceof Error ? error.message : "Failed to retrieve seat map",
+          status: "error",
+          message: "Unable to retrieve seat information at this time."
+        }, { status: 500 });
+      }
+    } else {
+      // Handle flight order ID case
+      try {
+        const seatMap = await getSeatMap({ flightOrderId });
+        return Response.json(seatMap);
+      } catch (error) {
+        console.error("Error fetching seat map:", error);
+        return Response.json({
+          error: error instanceof Error ? error.message : "Failed to retrieve seat map",
+          status: "error",
+          message: "Unable to retrieve seat information for this order."
+        }, { status: 500 });
+      }
     }
+  } catch (error) {
+    console.error("Error processing request:", error);
     
     return Response.json({
-      error: "Unable to retrieve seat map information"
+      error: error instanceof Error ? error.message : "Unable to retrieve seat map information",
+      status: "error"
     }, { status: 500 });
   }
 }
