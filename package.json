@@ -6,7 +6,9 @@
     "dev": "next dev --turbo",
     "build": "tsx db/migrate && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "migrate-flight-booking": "NODE_ENV=development tsx db/migrate-flight-booking.ts",
+    "setup-db": "NODE_ENV=development tsx db/create-tables.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^0.0.51",

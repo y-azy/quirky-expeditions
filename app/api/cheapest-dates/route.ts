@@ -25,6 +25,15 @@ export async function GET(request: Request) {
     return Response.json(cheapestDates);
   } catch (error) {
     console.error("Error fetching cheapest dates:", error);
-    return new Response("Failed to fetch cheapest dates", { status: 500 });
+    
+    if (error instanceof Error) {
+      return Response.json({
+        error: error.message || "Unable to retrieve cheapest flight dates"
+      }, { status: 500 });
+    }
+    
+    return Response.json({
+      error: "Unable to retrieve cheapest flight dates"
+    }, { status: 500 });
   }
 }

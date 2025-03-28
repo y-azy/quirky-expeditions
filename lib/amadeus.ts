@@ -9,20 +9,20 @@ if (!process.env.AMADEUS_CLIENT_ID || !process.env.AMADEUS_CLIENT_SECRET) {
   throw new Error("Missing Amadeus credentials");
 }
 
+// Initialize the Amadeus client with proper error handling
 export const amadeus = new Amadeus({
-  clientId: process.env.AMADEUS_CLIENT_ID,
-  clientSecret: process.env.AMADEUS_CLIENT_SECRET,
+  clientId: process.env.AMADEUS_CLIENT_ID || '',
+  clientSecret: process.env.AMADEUS_CLIENT_SECRET || '',
+  tokenUrl: process.env.AMADEUS_TOKEN_URL
 });
 
+// Type definition for flight offers
 export interface FlightOffer {
-  type: string;
   id: string;
   source: string;
   instantTicketingRequired: boolean;
   nonHomogeneous: boolean;
-  oneWay: boolean;
   lastTicketingDate: string;
-  numberOfBookableSeats: number;
   itineraries: Array<{
     duration: string;
     segments: Array<{
@@ -47,7 +47,6 @@ export interface FlightOffer {
       duration: string;
       id: string;
       numberOfStops: number;
-      blacklistedInEU: boolean;
     }>;
   }>;
   price: {
@@ -78,7 +77,6 @@ export interface FlightOffer {
       segmentId: string;
       cabin: string;
       fareBasis: string;
-      brandedFare: string;
       class: string;
       includedCheckedBags: {
         quantity: number;
@@ -119,3 +117,6 @@ export interface SeatMap {
     }>;
   }>;
 }
+
+// Remove this check since we're handling it properly above
+// and it's causing a false warning

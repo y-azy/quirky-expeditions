@@ -43,28 +43,7 @@ export async function POST(request: Request) {
 
   const result = await streamText({
     model: openAIModel,
-    system: `\n
-        - you are an AI travel agent using real Amadeus API data
-        - use IATA airport codes when searching flights
-        - validate flight numbers before checking status
-        - suggest alternative dates if flights are not available
-        - mention airline names and aircraft types when available
-        - help users understand baggage policies and restrictions
-        - keep responses concise and professional
-        - today's date is ${new Date().toLocaleDateString()}
-        - ask follow up questions to nudge user into the optimal flow
-        - ask for any details you don't know, like name of passenger, etc.
-        - here's the optimal flow
-          - search for flights using Amadeus Flight Offers Search API
-          - choose flight from the results
-          - select seats using Amadeus Seat Maps API
-          - create reservation (ask user whether to proceed with payment or change reservation)
-          - authorize payment (requires user consent, wait for user to finish payment)
-          - display boarding pass (DO NOT display without verifying payment)
-        - provide travel tips related to destinations
-        - offer information about travel requirements (visas, COVID, etc.)
-        - be helpful, friendly, and knowledgeable about travel
-        `,
+    system: `AI travel agent using Amadeus API. Help with flights, bookings & travel tips. Current: ${new Date().toLocaleDateString()}.`,
     messages: coreMessages,
     tools: {
       searchAirports: {
@@ -216,30 +195,7 @@ export async function POST(request: Request) {
             return { flights };
           } catch (error) {
             console.error("Error searching flights:", error);
-            // Return minimal mock data as fallback
-            return { 
-              flights: [
-                {
-                  id: "mock-flight-id",
-                  flightOfferId: "mock-flight-id",
-                  departure: {
-                    cityName: origin,
-                    airportCode: origin,
-                    timestamp: new Date(departureDate + "T12:00:00").toISOString(),
-                  },
-                  arrival: {
-                    cityName: destination,
-                    airportCode: destination,
-                    timestamp: new Date(departureDate + "T14:00:00").toISOString(),
-                  },
-                  airlines: ["XX"],
-                  flightNumber: "XX1234",
-                  priceInUSD: 299.99,
-                  numberOfStops: 0,
-                  raw: {}
-                }
-              ] 
-            };
+            throw new Error("Flight search unavailable.");
           }
         },
       },
@@ -251,10 +207,19 @@ export async function POST(request: Request) {
         }),
         execute: async ({ flightNumber, flightOfferId }) => {
           try {
+            // Validate flightOfferId to prevent API errors
+            if (!flightOfferId || flightOfferId === "1") {
+              return { 
+                flightNumber,
+                flightOfferId,
+                seats: [],
+                message: "No seat information available for this flight."
+              };
+            }
+            
             const seatMap = await getSeatMap({ flightOfferId });
             const seats = [];
-
-            // Extract seats from the seatmap
+            
             if (seatMap.data && seatMap.data.decks) {
               for (const deck of seatMap.data.decks) {
                 for (const row of deck.rows || []) {
@@ -271,18 +236,22 @@ export async function POST(request: Request) {
                 }
               }
             }
-
+            
             return { 
               flightNumber,
               flightOfferId,
-              seats: seats.length > 0 ? seats : generateMockSeats(flightNumber)
+              seats: seats.length > 0 ? seats : [],
+              message: seats.length === 0 ? "No seat information available for this flight." : undefined
             };
           } catch (error) {
             console.error("Error selecting seats:", error);
+            // Critical: Return an object instead of throwing an error
             return { 
               flightNumber,
               flightOfferId,
-              seats: generateMockSeats(flightNumber)
+              seats: [],
+              error: "Unable to retrieve seat map information.",
+              message: "The service is currently unavailable. Please try again later."
             };
           }
         },
@@ -313,7 +282,6 @@ export async function POST(request: Request) {
           try {
             // Calculate price based on flight offer and seats
             let totalPriceInUSD = 199.99; // Default fallback price
-            
             try {
               const pricingResponse = await confirmFlightPrice(props.flightOfferId);
               totalPriceInUSD = parseFloat(pricingResponse.flightOffers[0].price.total);
@@ -341,14 +309,14 @@ export async function POST(request: Request) {
             if (!session || !session.user || !session.user.id) {
               return { error: "User is not signed in to perform this action!" };
             }
-
+            
             const id = generateUUID();
             await createReservation({
               id,
               userId: session.user.id,
               details: { ...props, totalPriceInUSD },
             });
-
+            
             // Create flight booking record
             await createFlightBooking({
               reservationId: id,
@@ -357,7 +325,7 @@ export async function POST(request: Request) {
               seatNumbers: props.seats,
               totalPrice: totalPriceInUSD,
             });
-
+            
             return { 
               id, 
               ...props, 
@@ -512,16 +480,22 @@ export async function POST(request: Request) {
         }),
         execute: async ({ origin, maxPrice }) => {
           try {
-            return await getFlightInspirationSearch({ origin, maxPrice });
+            const result = await getFlightInspirationSearch({ origin, maxPrice });
+            
+            // Check if we have an error or warning in the response
+            if (result.errors || (result.warnings && result.data.length === 0)) {
+              return {
+                message: "Flight inspiration search unavailable for this origin.",
+                detail: "This functionality may be limited in test mode or for this airport."
+              };
+            }
+            
+            return result;
           } catch (error) {
             console.error("Error fetching flight inspirations:", error);
-            return { 
+            return {
               error: "Failed to fetch flight inspirations",
-              destinations: [
-                { destination: "LON", price: { total: "199.99" } },
-                { destination: "PAR", price: { total: "249.99" } },
-                { destination: "ROM", price: { total: "299.99" } }
-              ]
+              message: "The service is temporarily unavailable. Please try again later."
             };
           }
         }
@@ -534,25 +508,53 @@ export async function POST(request: Request) {
         }),
         execute: async ({ origin, destination }) => {
           try {
-            return await getCheapestFlightDates({ origin, destination });
+            const result = await getCheapestFlightDates({ origin, destination });
+            
+            // Handle structured errors in the response
+            if (result.errors && result.errors.length > 0) {
+              return {
+                origin,
+                destination,
+                dates: [],
+                error: result.errors[0].detail,
+                message: "This route may not be available in the current environment."
+              };
+            }
+            
+            return result;
           } catch (error) {
-            console.error("Error fetching cheapest dates:", error);
+            console.error("Error fetching cheapest flight dates:", error);
+            // Ensure we always return a valid object
             return {
-              error: "Failed to fetch cheapest dates",
-              cheapestDates: []
+              origin,
+              destination,
+              dates: [],
+              error: error instanceof Error ? error.message : "Service unavailable",
+              message: "Unable to retrieve cheapest flight dates at this time."
             };
           }
         }
       }
     },
-    onFinish: async ({ responseMessages }) => {
+    onFinish: async (responseMessages) => {
       if (session.user && session.user.id) {
         try {
-          await saveChat({
-            id,
-            messages: [...coreMessages, ...responseMessages],
-            userId: session.user.id,
-          });
+          // Check if responseMessages is iterable
+          if (responseMessages && Symbol.iterator in Object(responseMessages)) {
+            await saveChat({
+              id,
+              messages: [...coreMessages, ...responseMessages],
+              userId: session.user.id,
+            });
+          } else {
+            // Handle case where responseMessages is not iterable
+            console.log("responseMessages is not iterable, saving only core messages");
+            await saveChat({
+              id,
+              messages: coreMessages,
+              userId: session.user.id,
+            });
+          }
         } catch (error) {
           console.error("Failed to save chat:", error);
         }
@@ -560,33 +562,10 @@ export async function POST(request: Request) {
     },
     experimental_telemetry: {
       isEnabled: true,
-      functionId: "stream-text",
     },
   });
 
   return result.toDataStreamResponse({});
-}
-
-// Helper function to generate mock seats for fallback
-function generateMockSeats(flightNumber: string) {
-  const cabins = ['ECONOMY', 'PREMIUM_ECONOMY', 'BUSINESS', 'FIRST'];
-  const seats = [];
-  
-  for (let row = 1; row <= 10; row++) {
-    for (let seat of ['A', 'B', 'C', 'D', 'E', 'F']) {
-      const seatNumber = `${row}${seat}`;
-      const cabinType = row > 8 ? cabins[1] : cabins[0]; // First 2 rows as premium
-      
-      seats.push({
-        seatNumber,
-        priceInUSD: cabinType === cabins[0] ? 25 : 45,
-        isAvailable: Math.random() > 0.3, // 70% of seats available
-        cabin: cabinType
-      });
-    }
-  }
-  
-  return seats;
 }
 
 export async function DELETE(request: Request) {
@@ -598,7 +577,6 @@ export async function DELETE(request: Request) {
   }
 
   const session = await auth();
-
   if (!session || !session.user) {
     return new Response("Unauthorized", { status: 401 });
   }
@@ -614,6 +592,8 @@ export async function DELETE(request: Request) {
 
     return new Response("Chat deleted", { status: 200 });
   } catch (error) {
+    console.error("Error deleting chat:", error);
+    
     return new Response("An error occurred while processing your request", {
       status: 500,
     });

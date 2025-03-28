@@ -25,6 +25,15 @@ export async function GET(request: Request) {
     return Response.json(seatMap);
   } catch (error) {
     console.error("Error fetching seat map:", error);
-    return new Response("Failed to fetch seat map", { status: 500 });
+    
+    if (error instanceof Error) {
+      return Response.json({
+        error: error.message || "Unable to retrieve seat map information"
+      }, { status: 500 });
+    }
+    
+    return Response.json({
+      error: "Unable to retrieve seat map information"
+    }, { status: 500 });
   }
 }
